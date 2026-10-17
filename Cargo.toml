@@ -1,0 +1,13 @@
+[workspace]
+resolver = "2"
+members = ["core", "cli", "gui/src-tauri"]
+
+# Optimización para releases (aplica a todos los miembros del workspace,
+# Cargo solo permite definir perfiles en la raíz, no en cada crate).
+# Ver https://tauri.app/concept/size/#cargo-configuration
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = 3
+panic = "abort"
+strip = true

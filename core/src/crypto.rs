@@ -1,0 +1,105 @@
+//! Cifrado del contenido oculto.
+//!
+//! Decisión de arquitectura (documentada también en docs/02_ARQUITECTURA.md
+//! del proyecto): el OurSecret original de Windows ofrecía 5 algoritmos
+//! (AES, Blowfish, RC4, TEA, un XOR propio) más MD5/SHA para derivar la
+//! clave desde la contraseña. De esos, hoy (2026) solo AES sigue siendo
+//! buena práctica — RC4 está roto, Blowfish y TEA tienen debilidades
+//! conocidas, y usar MD5/SHA directo sobre la contraseña es vulnerable a
+//! fuerza bruta con GPU. Este port ofrece un único esquema, moderno y
+//! bien parametrizado, en vez de replicar el menú de opciones original.
+
+use aes_gcm::aead::{Aead, KeyInit, OsRng};
+use aes_gcm::{Aes256Gcm, Key, Nonce};
+use argon2::Argon2;
+use rand::RngCore;
+
+use crate::error::{OurSecretError, Result};
+
+pub const SALT_LEN: usize = 16;
+pub const NONCE_LEN: usize = 12;
+pub const KEY_LEN: usize = 32; // AES-256
+
+/// Deriva una clave AES-256 a partir de una contraseña y una sal, usando
+/// Argon2id con los parámetros por defecto de la librería (19 MiB de
+/// memoria, 2 iteraciones, 1 hilo — el perfil "interactivo" recomendado
+/// por RFC 9106 para operaciones que un usuario espera que terminen rápido).
+///
+/// Por qué Argon2id y no PBKDF2/SHA directo: Argon2id está diseñado para
+/// ser caro en memoria además de en CPU, lo que hace mucho más costoso
+/// montar un ataque de fuerza bruta en GPU/ASIC que con un hash simple.
+pub fn derive_key(password: &str, salt: &[u8; SALT_LEN]) -> Result<[u8; KEY_LEN]> {
+    let mut key = [0u8; KEY_LEN];
+    Argon2::default()
+        .hash_password_into(password.as_bytes(), salt, &mut key)
+        .map_err(|e| OurSecretError::Kdf(e.to_string()))?;
+    Ok(key)
+}
+
+pub fn random_salt() -> [u8; SALT_LEN] {
+    let mut salt = [0u8; SALT_LEN];
+    rand::thread_rng().fill_bytes(&mut salt);
+    salt
+}
+
+pub fn random_nonce() -> [u8; NONCE_LEN] {
+    let mut nonce = [0u8; NONCE_LEN];
+    rand::thread_rng().fill_bytes(&mut nonce);
+    nonce
+}
+
+/// Cifra `plaintext` con AES-256-GCM. GCM es cifrado *autenticado*: además
+/// de ocultar el contenido, detecta si alguien lo modificó (a diferencia
+/// del original, que usaba MD5 como simple checksum de integridad, no
+/// como protección criptográfica real).
+pub fn encrypt(key: &[u8; KEY_LEN], nonce: &[u8; NONCE_LEN], plaintext: &[u8]) -> Result<Vec<u8>> {
+    let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(key));
+    cipher
+        .encrypt(Nonce::from_slice(nonce), plaintext)
+        .map_err(|_| OurSecretError::DecryptionFailed) // encrypt no debería fallar nunca en la práctica
+}
+
+pub fn decrypt(key: &[u8; KEY_LEN], nonce: &[u8; NONCE_LEN], ciphertext: &[u8]) -> Result<Vec<u8>> {
+    let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(key));
+    cipher
+        .decrypt(Nonce::from_slice(nonce), ciphertext)
+        .map_err(|_| OurSecretError::DecryptionFailed)
+}
+
+/// Solo para que `OsRng` quede referenciado y el linter no se queje si en
+/// el futuro se usa directamente aquí en vez de a través de `rand`.
+#[allow(dead_code)]
+fn _silence_unused_import() {
+    let _ = OsRng;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn encrypt_then_decrypt_roundtrip() {
+        let salt = random_salt();
+        let key = derive_key("correct horse battery staple", &salt).unwrap();
+        let nonce = random_nonce();
+        let msg = b"hola brian, esto es un mensaje secreto";
+
+        let ct = encrypt(&key, &nonce, msg).unwrap();
+        assert_ne!(ct, msg, "el texto cifrado no debe ser igual al original");
+
+        let pt = decrypt(&key, &nonce, &ct).unwrap();
+        assert_eq!(pt, msg);
+    }
+
+    #[test]
+    fn wrong_password_fails_to_decrypt() {
+        let salt = random_salt();
+        let key_good = derive_key("contraseña-correcta", &salt).unwrap();
+        let key_bad = derive_key("contraseña-incorrecta", &salt).unwrap();
+        let nonce = random_nonce();
+
+        let ct = encrypt(&key_good, &nonce, b"secreto").unwrap();
+        let result = decrypt(&key_bad, &nonce, &ct);
+        assert!(matches!(result, Err(OurSecretError::DecryptionFailed)));
+    }
+}

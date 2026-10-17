@@ -1,0 +1,18 @@
+# Artefactos de compilación Rust (core, cli, y el backend de la gui)
+/target
+
+# Documentación de aprendizaje (Chronicler) — se queda local, no se versiona
+/docs
+
+# El instalador/binario original de OurSecret (Windows, SecureKit.net).
+# Es freeware pero no es nuestro para redistribuir empaquetado dentro de
+# este repo — cada quien se lo descarga de la fuente original si lo
+# necesita para análisis. También cubre cualquier .exe que generemos
+# nosotros fuera de /target (no deberían vivir en el repo, son binarios).
+*.exe
+OurSecret.exe
+license.txt
+
+# Editor / SO
+.DS_Store
+*.swp

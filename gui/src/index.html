@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>OurSecret Linux</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <h1>OurSecret <span class="accent">Linux</span></h1>
+      <nav class="tabs">
+        <button class="tab-btn active" data-tab="hide">Esconder</button>
+        <button class="tab-btn" data-tab="extract">Extraer</button>
+      </nav>
+    </header>
+
+    <main>
+      <!-- ================= ESCONDER ================= -->
+      <section id="tab-hide" class="tab-panel active">
+        <ol class="steps">
+          <li class="step" id="step-1">
+            <h2>Paso 1 — Archivo portador</h2>
+            <p class="hint">Cualquier archivo sirve (fotos, audio, vídeo, documentos...). Si es PNG/BMP también puedes usar el modo que mantiene las dimensiones.</p>
+            <div class="row">
+              <button id="pick-carrier" class="btn">Elegir archivo portador…</button>
+              <span id="carrier-name" class="file-chip">ninguno seleccionado</span>
+            </div>
+            <div id="carrier-info" class="info"></div>
+          </li>
+
+          <li class="step" id="step-2">
+            <h2>Paso 2 — Qué quieres esconder</h2>
+            <div class="row">
+              <button id="add-file" class="btn btn-secondary">+ Añadir archivo</button>
+            </div>
+            <ul id="item-list" class="item-list"></ul>
+
+            <details class="message-box">
+              <summary>Añadir un mensaje de texto</summary>
+              <input id="msg-subject" type="text" placeholder="Asunto" />
+              <textarea id="msg-text" rows="4" placeholder="Escribe el mensaje…"></textarea>
+              <button id="add-message" class="btn btn-secondary">Añadir mensaje a la lista</button>
+            </details>
+          </li>
+
+          <li class="step" id="step-3">
+            <h2>Paso 3 — Contraseña y modo</h2>
+            <div class="row">
+              <input id="password" type="password" placeholder="Contraseña" />
+              <input id="password2" type="password" placeholder="Repite la contraseña" />
+            </div>
+            <div class="row mode-row">
+              <label><input type="radio" name="mode" value="append" checked /> Modo <b>crece</b> — cualquier archivo, añade los datos al final</label>
+              <label><input type="radio" name="mode" value="lsb" /> Modo <b>mismas dimensiones</b> — solo imágenes PNG/BMP</label>
+            </div>
+            <div id="capacity-info" class="info"></div>
+          </li>
+        </ol>
+
+        <div class="action-row">
+          <button id="do-hide" class="btn btn-primary">Esconder y guardar como…</button>
+        </div>
+        <div id="hide-result" class="result"></div>
+      </section>
+
+      <!-- ================= EXTRAER ================= -->
+      <section id="tab-extract" class="tab-panel">
+        <ol class="steps">
+          <li class="step">
+            <h2>Paso 1 — Abrir archivo con datos ocultos</h2>
+            <div class="row">
+              <button id="pick-stego" class="btn">Elegir archivo…</button>
+              <span id="stego-name" class="file-chip">ninguno seleccionado</span>
+            </div>
+          </li>
+          <li class="step">
+            <h2>Paso 2 — Contraseña</h2>
+            <div class="row">
+              <input id="extract-password" type="password" placeholder="Contraseña" />
+              <button id="do-extract" class="btn btn-primary">Extraer</button>
+            </div>
+          </li>
+        </ol>
+        <div id="extract-result" class="result"></div>
+      </section>
+    </main>
+
+    <footer class="footer">
+      Reimplementación clean-room, sin código del OurSecret original. Formato propio: AES-256-GCM + Argon2id.
+    </footer>
+
+    <script type="module" src="main.js"></script>
+  </body>
+</html>

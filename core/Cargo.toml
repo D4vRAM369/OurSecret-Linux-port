@@ -1,0 +1,17 @@
+[package]
+name = "oursecret-core"
+version = "0.1.0"
+edition = "2021"
+description = "Núcleo de esteganografía + cifrado para el port Linux de OurSecret (formato propio, reimplementación clean-room)"
+license = "MIT"
+
+[dependencies]
+aes-gcm = "0.10"
+argon2 = "0.5"
+rand = "0.8"
+zip = { version = "0.6", default-features = false, features = ["deflate"] }
+image = { version = "0.24", default-features = false, features = ["png", "bmp"] }
+thiserror = "1"
+
+[dev-dependencies]
+tempfile = "3"

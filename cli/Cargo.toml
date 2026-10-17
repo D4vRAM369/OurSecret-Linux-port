@@ -1,0 +1,17 @@
+[package]
+name = "oursecret-cli"
+version = "0.1.0"
+edition = "2021"
+description = "CLI del port Linux de OurSecret: oculta y extrae archivos/mensajes en archivos portadores"
+license = "MIT"
+
+[[bin]]
+name = "oursecret"
+path = "src/main.rs"
+
+[dependencies]
+oursecret-core = { path = "../core" }
+clap = { version = "4", features = ["derive"] }
+rpassword = "7"
+anyhow = "1"
+image = { version = "0.24", default-features = false, features = ["png", "bmp"] }
