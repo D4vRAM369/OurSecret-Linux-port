@@ -2631,6 +2631,7 @@ dependencies = [
  "argon2",
  "image",
  "rand",
+ "rand_chacha",
  "tempfile",
  "thiserror 1.0.69",
  "zip",

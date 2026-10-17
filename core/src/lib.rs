@@ -47,24 +47,18 @@ pub fn hide(
     output_path: &Path,
 ) -> Result<()> {
     let plain_blob = bundle::pack(items)?;
-    let container = format::build_container(&plain_blob, password)?;
 
     match mode {
         EmbedMode::Append => {
             let carrier_bytes = std::fs::read(carrier_path)?;
-            let stego = embed::append::embed(&carrier_bytes, &container);
+            let stego = embed::append::embed(&carrier_bytes, &plain_blob, password)?;
             std::fs::write(output_path, stego)?;
         }
         EmbedMode::Lsb => {
             let img = image::open(carrier_path)?;
-            let capacity = embed::lsb::capacity_bytes(&img);
-            if container.len() > capacity {
-                return Err(OurSecretError::InsufficientCapacity {
-                    needed: container.len(),
-                    available: capacity,
-                });
-            }
-            let stego_img = embed::lsb::embed(&img, &container)?;
+            // La comprobación de capacidad vive dentro de lsb::embed (devuelve
+            // InsufficientCapacity con las cifras exactas).
+            let stego_img = embed::lsb::embed(&img, &plain_blob, password)?;
             stego_img.save_with_format(output_path, image::ImageFormat::Png)?;
         }
     }
@@ -78,22 +72,34 @@ pub fn hide(
 pub fn read(stego_path: &Path, password: &str) -> Result<Vec<Item>> {
     let raw = std::fs::read(stego_path)?;
 
-    // Primero probamos el modo append: es barato (no decodifica imagen) y
-    // si el archivo no es nuestro, falla rápido y limpio.
-    if let Ok((_carrier, container)) = embed::append::extract(&raw) {
-        let plain_blob = format::open_container(container, password)?;
-        return bundle::unpack(&plain_blob);
+    // Probamos primero el modo append. Ojo v2: sin cabecera mágica no se
+    // puede distinguir "no es nuestro" de "clave incorrecta" solo por la
+    // estructura, así que intentamos SIEMPRE también el LSB antes de
+    // rendirnos, y al final devolvemos el error más informativo.
+    let append_res = embed::append::extract(&raw, password);
+    if let Ok(plain_blob) = &append_res {
+        return bundle::unpack(plain_blob);
     }
 
-    // Si no, intentamos como imagen LSB.
-    match image::load_from_memory(&raw) {
-        Ok(img) => {
-            let container = embed::lsb::extract(&img)?;
-            let plain_blob = format::open_container(&container, password)?;
-            bundle::unpack(&plain_blob)
-        }
+    let lsb_res = match image::load_from_memory(&raw) {
+        Ok(img) => embed::lsb::extract(&img, password),
         Err(_) => Err(OurSecretError::NotAContainer),
+    };
+    if let Ok(plain_blob) = &lsb_res {
+        return bundle::unpack(plain_blob);
     }
+
+    // Ninguno descifró. Si alguno dijo "contraseña incorrecta" (la
+    // estructura encajaba pero GCM falló), ese mensaje es más útil que un
+    // genérico "no es un contenedor".
+    Err(match (append_res, lsb_res) {
+        (Err(OurSecretError::DecryptionFailed), _) | (_, Err(OurSecretError::DecryptionFailed)) => {
+            OurSecretError::DecryptionFailed
+        }
+        (Err(e), _) => e,
+        // Inalcanzable: si append_res fuese Ok ya habríamos vuelto arriba.
+        (Ok(_), _) => OurSecretError::NotAContainer,
+    })
 }
 
 #[cfg(test)]
@@ -128,9 +134,15 @@ mod tests {
         let recovered = read(&output_path, "password123").unwrap();
         assert_eq!(recovered, items);
 
-        // Contraseña incorrecta debe fallar, no devolver basura silenciosamente.
+        // Contraseña incorrecta debe fallar, no devolver basura.
+        // En el formato v2 (sin cabecera mágica) "clave incorrecta" es,
+        // a propósito, indistinguible de "este archivo no es nuestro":
+        // ambos son un error de extracción, no un resultado válido.
         let err = read(&output_path, "password-incorrecta").unwrap_err();
-        assert!(matches!(err, OurSecretError::DecryptionFailed));
+        assert!(matches!(
+            err,
+            OurSecretError::DecryptionFailed | OurSecretError::NotAContainer
+        ));
     }
 
     #[test]

@@ -21,9 +21,12 @@ pub const NONCE_LEN: usize = 12;
 pub const KEY_LEN: usize = 32; // AES-256
 
 /// Deriva una clave AES-256 a partir de una contraseña y una sal, usando
-/// Argon2id con los parámetros por defecto de la librería (19 MiB de
-/// memoria, 2 iteraciones, 1 hilo — el perfil "interactivo" recomendado
-/// por RFC 9106 para operaciones que un usuario espera que terminen rápido).
+/// Argon2id con los parámetros por defecto de la librería `argon2` 0.5
+/// (m = 19 MiB, t = 2, p = 1). Ojo: eso es el *mínimo* que recomienda la
+/// OWASP Password Storage Cheat Sheet, no un perfil de RFC 9106 (la RFC
+/// propone t=1,p=4,m=2 GiB o t=3,p=4,m=64 MiB). Medido: ~18 ms por intento
+/// en un Ryzen 5 5600G. Los parámetros no se guardan en el contenedor, así
+/// que cambiarlos exige subir `format::VERSION`.
 ///
 /// Por qué Argon2id y no PBKDF2/SHA directo: Argon2id está diseñado para
 /// ser caro en memoria además de en CPU, lo que hace mucho más costoso
@@ -34,6 +37,41 @@ pub fn derive_key(password: &str, salt: &[u8; SALT_LEN]) -> Result<[u8; KEY_LEN]
         .hash_password_into(password.as_bytes(), salt, &mut key)
         .map_err(|e| OurSecretError::Kdf(e.to_string()))?;
     Ok(key)
+}
+
+/// Flujo de bytes pseudoaleatorio determinista derivado de la clave, para
+/// el formato v2: se usa como máscara XOR de la longitud (que así no viaja
+/// en claro) y como semilla de la permutación de posiciones en LSB.
+///
+/// Usa ChaCha20 sembrado con la clave de 32 bytes que ya salió de Argon2id.
+/// Mismo (clave) => mismo flujo => quien tiene la contraseña reconstruye
+/// máscara y permutación; quien no, ve bytes indistinguibles de ruido.
+pub fn keystream(key: &[u8; KEY_LEN], len: usize) -> Vec<u8> {
+    use rand::SeedableRng;
+    let mut rng = rand_chacha::ChaCha20Rng::from_seed(*key);
+    let mut out = vec![0u8; len];
+    rng.fill_bytes(&mut out);
+    out
+}
+
+/// Permutación pseudoaleatoria de `0..count`, determinista por `key`. En
+/// LSB v2 decide EN QUÉ posiciones de la imagen van los bits del secreto:
+/// sin esto, la inserción es secuencial y el ataque chi-cuadrado por
+/// prefijos la detecta y ubica; con posiciones dispersas por toda la
+/// imagen, ese ataque deja de funcionar.
+pub fn permutation(key: &[u8; KEY_LEN], count: usize) -> Vec<u32> {
+    use rand::seq::SliceRandom;
+    use rand::SeedableRng;
+    // Semilla distinta de la del keystream para no correlacionar máscara y
+    // permutación (dominio separado: segundo bloque del keystream).
+    let mut seed = [0u8; KEY_LEN];
+    let mut rng0 = rand_chacha::ChaCha20Rng::from_seed(*key);
+    rng0.fill_bytes(&mut seed); // descarta el primer bloque (reservado a la máscara)
+    rng0.fill_bytes(&mut seed);
+    let mut rng = rand_chacha::ChaCha20Rng::from_seed(seed);
+    let mut idx: Vec<u32> = (0..count as u32).collect();
+    idx.shuffle(&mut rng);
+    idx
 }
 
 pub fn random_salt() -> [u8; SALT_LEN] {

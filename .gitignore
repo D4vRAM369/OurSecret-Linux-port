@@ -16,3 +16,4 @@ license.txt
 # Editor / SO
 .DS_Store
 *.swp
+.omc/

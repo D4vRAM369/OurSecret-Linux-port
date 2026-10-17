@@ -25,6 +25,11 @@ pub const MAGIC: [u8; 4] = *b"OSLX";
 pub const VERSION: u8 = 1;
 const HEADER_LEN: usize = 4 + 1 + SALT_LEN + NONCE_LEN + 8;
 
+/// Longitudes de las piezas del formato v2 (sin magia, sin versión, sin
+/// longitud en claro). Cada estrategia de `embed` coloca `salt | nonce | ct`
+/// a su manera; el ciphertext incluye el tag GCM de 16 bytes al final.
+pub const GCM_TAG_LEN: usize = 16;
+
 /// Construye el contenedor cifrado a partir del blob (zip) ya empaquetado
 /// y la contraseña del usuario. Genera sal y nonce aleatorios nuevos cada
 /// vez — nunca hay que reutilizar un nonce con la misma clave en AES-GCM.
@@ -69,10 +74,14 @@ pub fn open_container(container: &[u8], password: &str) -> Result<Vec<u8>> {
         u64::from_le_bytes(container[len_start..len_start + 8].try_into().unwrap()) as usize;
 
     let ct_start = len_start + 8;
-    if container.len() < ct_start + ct_len {
-        return Err(OurSecretError::NotAContainer);
-    }
-    let ciphertext = &container[ct_start..ct_start + ct_len];
+    // `ct_len` viene del archivo (no confiable): sin `checked_add`, un valor
+    // como u64::MAX desborda la suma y el slice de abajo hace panic, ANTES
+    // de comprobar la contraseña. Ver docs/informes (auditoría de superficie).
+    let ct_end = ct_start
+        .checked_add(ct_len)
+        .filter(|&end| end <= container.len())
+        .ok_or(OurSecretError::NotAContainer)?;
+    let ciphertext = &container[ct_start..ct_end];
 
     let key: [u8; KEY_LEN] = crypto::derive_key(password, &salt)?;
     crypto::decrypt(&key, &nonce, ciphertext)
@@ -111,6 +120,14 @@ mod tests {
         let container = build_container(b"secreto", "buena").unwrap();
         let err = open_container(&container, "mala").unwrap_err();
         assert!(matches!(err, OurSecretError::DecryptionFailed));
+    }
+
+    #[test]
+    fn huge_declared_length_errors_instead_of_panicking() {
+        let mut container = build_container(b"x", "pw").unwrap();
+        container[33..41].copy_from_slice(&u64::MAX.to_le_bytes());
+        let err = open_container(&container, "pw").unwrap_err();
+        assert!(matches!(err, OurSecretError::NotAContainer));
     }
 
     #[test]

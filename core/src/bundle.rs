@@ -65,11 +65,17 @@ pub fn unpack(blob: &[u8]) -> Result<Vec<Item>> {
 
     for i in 0..archive.len() {
         let mut entry = archive.by_index(i)?;
-        let name = entry.name().to_string();
+        // El nombre viene de dentro del contenedor: quien lo creó lo eligió.
+        // Nos quedamos solo con el último componente para que
+        // `out_dir.join(name)` nunca salga de out_dir ("../x", "/etc/x" — zip-slip).
+        let name = std::path::Path::new(entry.name())
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "archivo".to_string());
         let mut data = Vec::new();
         entry.read_to_end(&mut data)?;
 
-        if let Some(_rest) = name.strip_prefix(MESSAGE_PREFIX) {
+        if entry.name().starts_with(MESSAGE_PREFIX) {
             let text = String::from_utf8_lossy(&data);
             let mut parts = text.splitn(2, '\n');
             let subject = parts.next().unwrap_or_default().to_string();
@@ -101,6 +107,18 @@ fn sanitize_filename(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn unpack_strips_path_components_from_file_names() {
+        let evil = ["../escapado.txt", "/etc/escapado.txt", "a/../../escapado.txt"];
+        let items: Vec<Item> = evil
+            .iter()
+            .map(|n| Item::File { name: n.to_string(), data: vec![1] })
+            .collect();
+        for item in unpack(&pack(&items).unwrap()).unwrap() {
+            assert!(matches!(item, Item::File { ref name, .. } if name == "escapado.txt"));
+        }
+    }
 
     #[test]
     fn pack_and_unpack_roundtrip_mixed_items() {

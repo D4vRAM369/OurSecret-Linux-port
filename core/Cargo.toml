@@ -9,6 +9,7 @@ license = "MIT"
 aes-gcm = "0.10"
 argon2 = "0.5"
 rand = "0.8"
+rand_chacha = "0.3"
 zip = { version = "0.6", default-features = false, features = ["deflate"] }
 image = { version = "0.24", default-features = false, features = ["png", "bmp"] }
 thiserror = "1"
