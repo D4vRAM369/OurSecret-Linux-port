@@ -3,7 +3,7 @@
 //!
 //! # Formato (difícil de detectar)
 //!
-//! Tres decisiones contra la detección (ver
+//! Cuatro decisiones contra la detección (ver
 //! `docs/informes/2026-10-17-auditoria-superficie-sin-clave.md`, que las
 //! motivó a partir de un primer formato ya retirado):
 //!
@@ -25,11 +25,15 @@
 //! posiciones 160..N     payload (nonce|ciphertext) en orden permutado por clave
 //! ```
 //!
-//! Qué NO esconde (honestidad): el *número total* de bits LSB
-//! modificados sigue siendo estimable con análisis RS si la carga es alta
-//! — contra eso solo ayudan cargas pequeñas o ±1 matching, que no se
-//! implementan aquí. Lo que sí se rompe es la detección por firma, por
-//! longitud en claro, por canal alfa y por chi-cuadrado secuencial.
+//! 4. **±1 matching** en vez de reemplazar el bit (ver `set_lsb`). Medido:
+//!    el análisis RS pasa de estimar la carga casi exacta (0,93 con la
+//!    imagen al 95 %) a dar lo mismo que la imagen limpia (≈0).
+//!
+//! Qué NO esconde (honestidad): ±1 matching también deja huella, solo que
+//! más sutil (suaviza el histograma). Hay detectores específicos para él
+//! (función característica del histograma, calibración, modelos tipo SPAM
+//! o redes neuronales entrenadas), y funcionan mejor cuanto más alta es la
+//! carga. Lo más eficaz sigue siendo esconder poco en imágenes grandes.
 
 use image::{DynamicImage, ImageBuffer, Rgb};
 
@@ -158,8 +162,28 @@ fn mask_u32(key: &[u8; KEY_LEN]) -> u32 {
     u32::from_le_bytes(ks.try_into().unwrap())
 }
 
+/// LSB *matching* (±1), no LSB *replacement*. Si el último bit ya es el
+/// que queremos, no se toca nada. Si no, se suma o resta 1 al azar (en
+/// 0 solo se puede sumar, en 255 solo restar). Las dos opciones cambian el
+/// último bit igual, así que `get_lsb` lee lo mismo: la extracción no cambia.
+///
+/// Por qué: reemplazar el bit solo mueve valores dentro de su pareja
+/// (2k ↔ 2k+1), y eso deja una huella que el análisis RS y el
+/// chi-cuadrado miden (las parejas se "igualan"). Con ±1, un 2k puede
+/// irse a 2k−1, que es de otra pareja, y esa simetría desaparece.
+///
+/// El azar del ±1 no sale de la clave: no hace falta reproducirlo al leer,
+/// y así no aporta ninguna pista sobre ella.
 fn set_lsb(byte: &mut u8, bit: u8) {
-    *byte = (*byte & 0b1111_1110) | (bit & 1);
+    if *byte & 1 == bit & 1 {
+        return;
+    }
+    *byte = match *byte {
+        0 => 1,
+        255 => 254,
+        b if rand::random::<bool>() => b + 1,
+        b => b - 1,
+    };
 }
 
 fn get_lsb(byte: u8) -> u8 {
@@ -215,6 +239,31 @@ mod tests {
 
         let recovered = extract(&stego, "clave").unwrap();
         assert_eq!(recovered, plain);
+    }
+
+    #[test]
+    fn set_lsb_is_plus_minus_one_and_uses_both_directions() {
+        for v in 0..=255u8 {
+            for bit in 0..=1u8 {
+                let mut b = v;
+                set_lsb(&mut b, bit);
+                assert_eq!(get_lsb(b), bit, "v={v} bit={bit}");
+                assert!(b.abs_diff(v) <= 1, "v={v} -> {b}: más de ±1");
+                if v & 1 == bit {
+                    assert_eq!(b, v, "si el bit ya coincide no se toca");
+                }
+            }
+        }
+        // Con 200 intentos, que salgan siempre +1 (o siempre −1) tiene
+        // probabilidad 2^-199: si pasa, el azar no funciona.
+        let results: std::collections::HashSet<u8> = (0..200)
+            .map(|_| {
+                let mut b = 100u8;
+                set_lsb(&mut b, 1);
+                b
+            })
+            .collect();
+        assert_eq!(results, [99u8, 101].into_iter().collect());
     }
 
     #[test]
