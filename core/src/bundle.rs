@@ -110,10 +110,17 @@ mod tests {
 
     #[test]
     fn unpack_strips_path_components_from_file_names() {
-        let evil = ["../escapado.txt", "/etc/escapado.txt", "a/../../escapado.txt"];
+        let evil = [
+            "../escapado.txt",
+            "/etc/escapado.txt",
+            "a/../../escapado.txt",
+        ];
         let items: Vec<Item> = evil
             .iter()
-            .map(|n| Item::File { name: n.to_string(), data: vec![1] })
+            .map(|n| Item::File {
+                name: n.to_string(),
+                data: vec![1],
+            })
             .collect();
         for item in unpack(&pack(&items).unwrap()).unwrap() {
             assert!(matches!(item, Item::File { ref name, .. } if name == "escapado.txt"));

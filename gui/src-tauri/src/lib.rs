@@ -4,7 +4,7 @@
 //! serializables (para hablar con el frontend JS) y las funciones reales
 //! de `oursecret-core`, que es donde vive toda la lógica de verdad. Nada
 //! de criptografía, parsing de formato ni esteganografía se implementa
-//! aquí — eso ya está hecho, probado (13 tests) y compartido con la CLI.
+//! aquí — eso ya está hecho, probado y compartido con la CLI.
 
 use std::path::PathBuf;
 
@@ -90,8 +90,8 @@ fn extract_items(
     out_dir: String,
     password: String,
 ) -> Result<Vec<ExtractedItem>, String> {
-    let items = oursecret_core::read(&PathBuf::from(&input_path), &password)
-        .map_err(|e| e.to_string())?;
+    let items =
+        oursecret_core::read(&PathBuf::from(&input_path), &password).map_err(|e| e.to_string())?;
 
     let out_dir_path = PathBuf::from(&out_dir);
     std::fs::create_dir_all(&out_dir_path).map_err(|e| e.to_string())?;
@@ -100,8 +100,8 @@ fn extract_items(
     for item in items {
         match item {
             Item::File { name, data } => {
-                let dest = out_dir_path.join(&name);
-                std::fs::write(&dest, &data).map_err(|e| e.to_string())?;
+                let dest = oursecret_core::save_extracted_file(&out_dir_path, &name, &data)
+                    .map_err(|e| e.to_string())?;
                 result.push(ExtractedItem::File {
                     name,
                     saved_to: dest.to_string_lossy().to_string(),

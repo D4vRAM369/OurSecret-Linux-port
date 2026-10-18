@@ -153,8 +153,7 @@ fn cmd_extract(input: PathBuf, out_dir: PathBuf, password: Option<String>) -> Re
     for item in items {
         match item {
             Item::File { name, data } => {
-                let path = out_dir.join(&name);
-                std::fs::write(&path, &data)?;
+                let path = oursecret_core::save_extracted_file(&out_dir, &name, &data)?;
                 println!("archivo  -> {}", path.display());
             }
             Item::Message { subject, text } => {

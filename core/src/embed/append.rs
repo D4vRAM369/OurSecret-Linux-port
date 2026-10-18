@@ -2,7 +2,7 @@
 //! el archivo resultante crece (igual que el modal "Hide more data" del
 //! original).
 //!
-//! # Formato v2 (actual, indetectable por firma)
+//! # Formato (indetectable por firma)
 //!
 //! ```text
 //! [ bytes originales del portador ] [ nonce(12) ] [ ciphertext ] [ salt(16) ] [ trailer: u64 LE ]
@@ -23,24 +23,17 @@
 //! La extracción: leer los últimos 8 bytes y los 16 anteriores (sal),
 //! derivar la clave, descifrar la longitud, saltar hacia atrás esa cantidad.
 //! O(1), sin escanear.
-//!
-//! # Formato v1 (solo lectura, archivos antiguos)
-//!
-//! `[ portador ] [ OSLX... contenedor con magia ] [ u64 LE longitud ]`.
-//! Se intenta al leer si el v2 no encaja, para no romper archivos ya
-//! generados. No se escribe nunca más.
 
-use crate::crypto::{self, KEY_LEN, NONCE_LEN, SALT_LEN};
+use crate::crypto::{self, GCM_TAG_LEN, KEY_LEN, NONCE_LEN, SALT_LEN};
 use crate::error::{OurSecretError, Result};
-use crate::format::{self, GCM_TAG_LEN};
 
 const TRAILER_LEN: usize = 8;
-/// Mínimo payload v2 = nonce + tag GCM (ciphertext de 0 bytes de claro).
+/// Mínimo payload = nonce + tag GCM (ciphertext de 0 bytes de claro).
 const MIN_PAYLOAD: usize = NONCE_LEN + GCM_TAG_LEN;
 /// Overhead fijo al final: sal + trailer.
 const TAIL_LEN: usize = SALT_LEN + TRAILER_LEN;
 
-/// Esconde `plain_blob` al final de `carrier`, formato v2. Devuelve el
+/// Esconde `plain_blob` al final de `carrier`. Devuelve el
 /// archivo resultante listo para escribir.
 pub fn embed(carrier: &[u8], plain_blob: &[u8], password: &str) -> Result<Vec<u8>> {
     let salt = crypto::random_salt();
@@ -61,20 +54,9 @@ pub fn embed(carrier: &[u8], plain_blob: &[u8], password: &str) -> Result<Vec<u8
     Ok(out)
 }
 
-/// Extrae y descifra un archivo generado por `embed` (v2). Devuelve el
-/// `plain_blob`. Si los bytes no encajan como contenedor v2, intenta el
-/// formato v1 antiguo antes de rendirse.
+/// Extrae y descifra un archivo generado por `embed`. Devuelve el
+/// `plain_blob`.
 pub fn extract(stego: &[u8], password: &str) -> Result<Vec<u8>> {
-    match extract_v2(stego, password) {
-        // Si v2 descifró o dio "contraseña incorrecta" sobre una estructura
-        // que SÍ encajaba, ese es el veredicto. Solo si "no parece v2"
-        // (NotAContainer) probamos el formato antiguo.
-        Err(OurSecretError::NotAContainer) => extract_v1(stego, password),
-        other => other,
-    }
-}
-
-fn extract_v2(stego: &[u8], password: &str) -> Result<Vec<u8>> {
     if stego.len() < MIN_PAYLOAD + TAIL_LEN {
         return Err(OurSecretError::NotAContainer);
     }
@@ -104,24 +86,6 @@ fn extract_v2(stego: &[u8], password: &str) -> Result<Vec<u8>> {
     let ciphertext = &payload[NONCE_LEN..];
 
     crypto::decrypt(&key, &nonce, ciphertext)
-}
-
-/// Lectura del formato v1 (con cabecera mágica OSLX). Solo para archivos
-/// generados antes del v2.
-fn extract_v1(stego: &[u8], password: &str) -> Result<Vec<u8>> {
-    if stego.len() < TRAILER_LEN {
-        return Err(OurSecretError::NotAContainer);
-    }
-    let (rest, trailer) = stego.split_at(stego.len() - TRAILER_LEN);
-    let container_len = u64::from_le_bytes(trailer.try_into().unwrap()) as usize;
-    if container_len > rest.len() {
-        return Err(OurSecretError::NotAContainer);
-    }
-    let container = &rest[rest.len() - container_len..];
-    if container.len() < 4 || container[0..4] != format::MAGIC {
-        return Err(OurSecretError::NotAContainer);
-    }
-    format::open_container(container, password)
 }
 
 /// Primeros 8 bytes del keystream derivado de la clave, como u64 LE. Máscara
@@ -162,7 +126,7 @@ mod tests {
         let stego = embed(b"portador cualquiera", b"secreto", "clave").unwrap();
         assert!(
             stego.windows(4).all(|w| w != b"OSLX"),
-            "el v2 no debe contener la firma OSLX"
+            "la salida no debe contener la antigua firma OSLX"
         );
     }
 

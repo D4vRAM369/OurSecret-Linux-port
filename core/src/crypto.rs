@@ -18,6 +18,8 @@ use crate::error::{OurSecretError, Result};
 
 pub const SALT_LEN: usize = 16;
 pub const NONCE_LEN: usize = 12;
+/// Tag de autenticación que AES-GCM añade al final del ciphertext.
+pub const GCM_TAG_LEN: usize = 16;
 pub const KEY_LEN: usize = 32; // AES-256
 
 /// Deriva una clave AES-256 a partir de una contraseña y una sal, usando
@@ -25,8 +27,9 @@ pub const KEY_LEN: usize = 32; // AES-256
 /// (m = 19 MiB, t = 2, p = 1). Ojo: eso es el *mínimo* que recomienda la
 /// OWASP Password Storage Cheat Sheet, no un perfil de RFC 9106 (la RFC
 /// propone t=1,p=4,m=2 GiB o t=3,p=4,m=64 MiB). Medido: ~18 ms por intento
-/// en un Ryzen 5 5600G. Los parámetros no se guardan en el contenedor, así
-/// que cambiarlos exige subir `format::VERSION`.
+/// en un Ryzen 5 5600G. Los parámetros no se guardan en el archivo (no hay
+/// cabecera ni versión, a propósito): cambiarlos rompe la lectura de todos
+/// los archivos ya generados.
 ///
 /// Por qué Argon2id y no PBKDF2/SHA directo: Argon2id está diseñado para
 /// ser caro en memoria además de en CPU, lo que hace mucho más costoso
@@ -40,7 +43,7 @@ pub fn derive_key(password: &str, salt: &[u8; SALT_LEN]) -> Result<[u8; KEY_LEN]
 }
 
 /// Flujo de bytes pseudoaleatorio determinista derivado de la clave, para
-/// el formato v2: se usa como máscara XOR de la longitud (que así no viaja
+/// los dos modos de `embed`: se usa como máscara XOR de la longitud (que así no viaja
 /// en claro) y como semilla de la permutación de posiciones en LSB.
 ///
 /// Usa ChaCha20 sembrado con la clave de 32 bytes que ya salió de Argon2id.
@@ -55,7 +58,7 @@ pub fn keystream(key: &[u8; KEY_LEN], len: usize) -> Vec<u8> {
 }
 
 /// Permutación pseudoaleatoria de `0..count`, determinista por `key`. En
-/// LSB v2 decide EN QUÉ posiciones de la imagen van los bits del secreto:
+/// el modo LSB decide EN QUÉ posiciones de la imagen van los bits del secreto:
 /// sin esto, la inserción es secuencial y el ataque chi-cuadrado por
 /// prefijos la detecta y ubica; con posiciones dispersas por toda la
 /// imagen, ese ataque deja de funcionar.

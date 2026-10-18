@@ -76,7 +76,11 @@ function renderItems() {
     const li = document.createElement("li");
     const label =
       item.kind === "file" ? `📄 ${item.label}` : `✉️ Mensaje: "${item.subject}"`;
-    li.innerHTML = `<span>${label}</span>`;
+    // textContent, nunca innerHTML: el nombre de un archivo del disco puede
+    // contener "<img onerror=...>" y se ejecutaría como código.
+    const span = document.createElement("span");
+    span.textContent = label;
+    li.appendChild(span);
     const removeBtn = document.createElement("button");
     removeBtn.textContent = "quitar";
     removeBtn.addEventListener("click", () => {
@@ -173,10 +177,17 @@ document.getElementById("do-extract").addEventListener("click", async () => {
     results.forEach((item) => {
       const div = document.createElement("div");
       div.className = "extracted-item";
+      // Todo lo extraído lo eligió quien creó el archivo (y conoce la
+      // contraseña): es texto no confiable. Con innerHTML, un asunto como
+      // "<img src=x onerror=...>" ejecutaría JS con acceso a window.__TAURI__.
       if (item.kind === "file") {
-        div.innerHTML = `<div class="k">archivo</div><div>${item.name}</div><div class="hint">${item.saved_to}</div>`;
+        div.append(textDiv("k", "archivo"), textDiv("", item.name), textDiv("hint", item.saved_to));
       } else {
-        div.innerHTML = `<div class="k">mensaje</div><div><b>${item.subject}</b></div><div>${item.text.replace(/</g, "&lt;")}</div>`;
+        const subject = document.createElement("b");
+        subject.textContent = item.subject;
+        const subjectDiv = textDiv("", "");
+        subjectDiv.appendChild(subject);
+        div.append(textDiv("k", "mensaje"), subjectDiv, textDiv("", item.text));
       }
       extractResultEl.appendChild(div);
     });
@@ -186,6 +197,13 @@ document.getElementById("do-extract").addEventListener("click", async () => {
 });
 
 // ---------- Utilidades ----------
+function textDiv(className, text) {
+  const d = document.createElement("div");
+  if (className) d.className = className;
+  d.textContent = text;
+  return d;
+}
+
 function basename(path) {
   return path.split(/[\\/]/).pop();
 }

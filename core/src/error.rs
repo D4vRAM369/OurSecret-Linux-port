@@ -14,15 +14,8 @@ pub enum OurSecretError {
     #[error("contraseña incorrecta o datos ocultos corruptos")]
     DecryptionFailed,
 
-    #[error(
-        "el archivo no contiene datos de OurSecret-Linux reconocibles (falta la cabecera mágica)"
-    )]
+    #[error("no se encontraron datos ocultos (o la contraseña es incorrecta)")]
     NotAContainer,
-
-    #[error(
-        "versión de formato no soportada: {0} (esta versión de oursecret-core solo entiende la v1)"
-    )]
-    UnsupportedVersion(u8),
 
     #[error("el modo 'keep same size' (LSB) solo funciona con imágenes PNG o BMP sin comprimir con pérdida; este portador no es una de ellas: {0}")]
     UnsupportedCarrierForLsb(String),

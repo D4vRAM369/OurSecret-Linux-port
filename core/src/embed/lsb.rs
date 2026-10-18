@@ -1,23 +1,21 @@
 //! Modo LSB (Least Significant Bit): oculta el contenedor cifrado en el
 //! bit menos significativo de los bytes de píxel de una imagen PNG o BMP.
 //!
-//! # Formato v2 (actual, más difícil de detectar)
+//! # Formato (difícil de detectar)
 //!
-//! Tres mejoras sobre el v1 respecto a la detectabilidad (ver
-//! `docs/informes/2026-10-17-auditoria-superficie-sin-clave.md`):
+//! Tres decisiones contra la detección (ver
+//! `docs/informes/2026-10-17-auditoria-superficie-sin-clave.md`, que las
+//! motivó a partir de un primer formato ya retirado):
 //!
-//! 1. **Solo RGB, nunca alfa.** El v1 pasaba la imagen a RGBA y escribía
-//!    también en el canal alfa; una foto opaca que de repente tiene alfa
-//!    con valores ≠255 es una señal obvia. El v2 trabaja sobre los 3
-//!    canales de color y deja la imagen en RGB.
-//! 2. **Longitud cifrada.** El v1 escribía la longitud del contenido en
-//!    claro en los primeros 32 LSB. El v2 la guarda XOR una máscara
-//!    derivada de la clave → parece ruido.
-//! 3. **Posiciones derivadas de la clave.** El v1 insertaba de forma
-//!    secuencial (desde el píxel 0), lo que el ataque chi-cuadrado por
-//!    prefijos detecta y ubica. El v2 dispersa los bits por toda la imagen
-//!    según una permutación que solo puede reconstruir quien tiene la
-//!    contraseña.
+//! 1. **Solo RGB, nunca alfa.** Una foto opaca que de repente tiene alfa
+//!    con valores ≠255 es una señal obvia. Se trabaja sobre los 3 canales
+//!    de color y la imagen se queda en RGB.
+//! 2. **Longitud cifrada.** La longitud se guarda XOR una máscara derivada
+//!    de la clave → parece ruido.
+//! 3. **Posiciones derivadas de la clave.** Insertar de forma secuencial
+//!    (desde el píxel 0) lo detecta y ubica el ataque chi-cuadrado por
+//!    prefijos. Aquí los bits se dispersan por toda la imagen según una
+//!    permutación que solo puede reconstruir quien tiene la contraseña.
 //!
 //! Distribución de las posiciones LSB (sobre los bytes RGB de la imagen):
 //!
@@ -27,37 +25,32 @@
 //! posiciones 160..N     payload (nonce|ciphertext) en orden permutado por clave
 //! ```
 //!
-//! Qué NO esconde el v2 (honestidad): el *número total* de bits LSB
+//! Qué NO esconde (honestidad): el *número total* de bits LSB
 //! modificados sigue siendo estimable con análisis RS si la carga es alta
 //! — contra eso solo ayudan cargas pequeñas o ±1 matching, que no se
-//! implementan aquí. Lo que el v2 rompe es la detección por firma, por
+//! implementan aquí. Lo que sí se rompe es la detección por firma, por
 //! longitud en claro, por canal alfa y por chi-cuadrado secuencial.
-//!
-//! # Formato v1 (solo lectura)
-//!
-//! Longitud en claro (32 bits) + contenedor con magia, sobre RGBA
-//! secuencial. Se intenta al leer si el v2 no encaja.
 
 use image::{DynamicImage, ImageBuffer, Rgb};
 
-use crate::crypto::{self, KEY_LEN, NONCE_LEN, SALT_LEN};
+use crate::crypto::{self, GCM_TAG_LEN, KEY_LEN, NONCE_LEN, SALT_LEN};
 use crate::error::{OurSecretError, Result};
 
 const SALT_BITS: usize = SALT_LEN * 8; // 128
 const LEN_BITS: usize = 32;
 const OVERHEAD_BITS: usize = SALT_BITS + LEN_BITS; // 160
-/// Mínimo payload v2 = nonce + tag GCM.
-const MIN_PAYLOAD: usize = NONCE_LEN + crate::format::GCM_TAG_LEN;
+/// Mínimo payload = nonce + tag GCM.
+const MIN_PAYLOAD: usize = NONCE_LEN + GCM_TAG_LEN;
 
 /// Cuántos bytes de payload (nonce|ciphertext) caben, como máximo, en esta
-/// imagen con el formato v2. El contenedor interno (el zip) será algo menor,
+/// imagen. El contenedor interno (el zip) será algo menor,
 /// porque el cifrado añade nonce (12) + tag (16).
 pub fn capacity_bytes(img: &DynamicImage) -> usize {
     let raw_len = img.to_rgb8().into_raw().len();
     raw_len.saturating_sub(OVERHEAD_BITS) / 8
 }
 
-/// Incrusta `plain_blob` en los LSB de `img` (formato v2). Devuelve la
+/// Incrusta `plain_blob` en los LSB de `img`. Devuelve la
 /// imagen resultante, mismas dimensiones, en RGB.
 pub fn embed(img: &DynamicImage, plain_blob: &[u8], password: &str) -> Result<DynamicImage> {
     let rgb = img.to_rgb8();
@@ -109,16 +102,8 @@ pub fn embed(img: &DynamicImage, plain_blob: &[u8], password: &str) -> Result<Dy
     Ok(DynamicImage::ImageRgb8(buf))
 }
 
-/// Extrae y descifra el contenido incrustado (v2). Si no encaja como v2,
-/// intenta el formato v1 antiguo. Devuelve el `plain_blob`.
+/// Extrae y descifra el contenido incrustado. Devuelve el `plain_blob`.
 pub fn extract(img: &DynamicImage, password: &str) -> Result<Vec<u8>> {
-    match extract_v2(img, password) {
-        Err(OurSecretError::NotAContainer) => extract_v1(img, password),
-        other => other,
-    }
-}
-
-fn extract_v2(img: &DynamicImage, password: &str) -> Result<Vec<u8>> {
     let raw = img.to_rgb8().into_raw();
     if raw.len() < OVERHEAD_BITS {
         return Err(OurSecretError::NotAContainer);
@@ -166,32 +151,6 @@ fn extract_v2(img: &DynamicImage, password: &str) -> Result<Vec<u8>> {
     nonce.copy_from_slice(&payload[..NONCE_LEN]);
     let ciphertext = &payload[NONCE_LEN..];
     crypto::decrypt(&key, &nonce, ciphertext)
-}
-
-/// Lectura del formato v1 (RGBA, longitud en claro, contenedor con magia).
-fn extract_v1(img: &DynamicImage, password: &str) -> Result<Vec<u8>> {
-    const LEN_PREFIX_BITS: usize = 32;
-    let raw = img.to_rgba8().into_raw();
-    if raw.len() < LEN_PREFIX_BITS {
-        return Err(OurSecretError::NotAContainer);
-    }
-    let mut len_bits = [0u8; LEN_PREFIX_BITS];
-    for (i, bit) in len_bits.iter_mut().enumerate() {
-        *bit = get_lsb(raw[i]);
-    }
-    let container_len = u32_of_bits(&len_bits) as usize;
-    if LEN_PREFIX_BITS + container_len * 8 > raw.len() {
-        return Err(OurSecretError::NotAContainer);
-    }
-    let mut container = vec![0u8; container_len];
-    for (byte_idx, out_byte) in container.iter_mut().enumerate() {
-        let mut byte = 0u8;
-        for bit_idx in 0..8 {
-            byte = (byte << 1) | get_lsb(raw[LEN_PREFIX_BITS + byte_idx * 8 + bit_idx]);
-        }
-        *out_byte = byte;
-    }
-    crate::format::open_container(&container, password)
 }
 
 fn mask_u32(key: &[u8; KEY_LEN]) -> u32 {
@@ -276,9 +235,9 @@ mod tests {
     fn capacity_matches_embed_threshold() {
         let img = test_image(16, 16); // 16*16*3 = 768 bytes raw
         let cap = capacity_bytes(&img); // payload máximo
-        // Un plain_blob que, cifrado, deja el payload justo en el límite:
-        // payload = 12 (nonce) + plain + 16 (tag). cap = payload máximo.
-        let plain = vec![0xABu8; cap - NONCE_LEN - crate::format::GCM_TAG_LEN];
+                                        // Un plain_blob que, cifrado, deja el payload justo en el límite:
+                                        // payload = 12 (nonce) + plain + 16 (tag). cap = payload máximo.
+        let plain = vec![0xABu8; cap - NONCE_LEN - GCM_TAG_LEN];
         assert!(embed(&img, &plain, "k").is_ok());
         let too_big = vec![0xABu8; cap]; // payload > cap seguro
         assert!(embed(&img, &too_big, "k").is_err());
