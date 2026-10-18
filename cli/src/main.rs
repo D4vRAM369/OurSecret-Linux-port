@@ -157,15 +157,40 @@ fn cmd_extract(input: PathBuf, out_dir: PathBuf, password: Option<String>) -> Re
         match item {
             Item::File { name, data } => {
                 let path = oursecret_core::save_extracted_file(&out_dir, &name, &data)?;
-                println!("archivo  -> {}", path.display());
+                println!(
+                    "archivo  -> {}",
+                    for_terminal(&path.display().to_string(), false)
+                );
             }
             Item::Message { subject, text } => {
-                println!("mensaje  -> asunto: {subject}");
-                println!("            {text}");
+                println!("mensaje  -> asunto: {}", for_terminal(&subject, false));
+                println!("            {}", for_terminal(&text, true));
             }
         }
     }
     Ok(())
+}
+
+/// Escapa los caracteres de control de un texto extraído antes de imprimirlo.
+///
+/// Lo extraído lo eligió quien creó el archivo, y la terminal no solo pinta
+/// texto: ejecuta las secuencias que empiezan por ESC (cambiar el título,
+/// borrar la pantalla, escribir en el portapapeles con OSC 52...). Es el mismo
+/// problema que `innerHTML` en la GUI, con otro intérprete al otro lado.
+/// `keep_newlines` deja pasar `\n` y `\t` en el cuerpo de los mensajes.
+///
+/// ponytail: solo categoría Cc (C0, DEL, C1). Los caracteres bidi (U+202E...)
+/// pueden disfrazar un nombre pero no ejecutan nada; escaparlos si hace falta.
+fn for_terminal(s: &str, keep_newlines: bool) -> String {
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        if c.is_control() && !(keep_newlines && (c == '\n' || c == '\t')) {
+            out.extend(c.escape_default());
+        } else {
+            out.push(c);
+        }
+    }
+    out
 }
 
 fn cmd_capacity(carrier: PathBuf) -> Result<()> {
@@ -185,4 +210,26 @@ fn prompt_password_with_confirmation() -> Result<String> {
         bail!("la contraseña no puede estar vacía");
     }
     Ok(p1)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::for_terminal;
+
+    #[test]
+    fn for_terminal_neutralizes_escape_sequences() {
+        // Título (OSC 0), borrar pantalla (CSI 2J), portapapeles (OSC 52),
+        // CSI de 8 bits (C1 0x9B) y retorno de carro que pisa la línea.
+        let evil = "\x1b]0;PWNED\x07\x1b[2J\x1b]52;c;ZXZpbA==\x07\u{9b}31m\rfalso";
+        for keep in [false, true] {
+            let out = for_terminal(evil, keep);
+            assert!(!out.chars().any(char::is_control), "{out:?}");
+            assert!(out.contains("PWNED") && out.contains("falso"));
+        }
+        // El texto normal (acentos incluidos) no cambia.
+        assert_eq!(for_terminal("año, café", false), "año, café");
+        // En el cuerpo se conservan los saltos de línea; en asunto/nombre, no.
+        assert_eq!(for_terminal("a\nb\tc", true), "a\nb\tc");
+        assert_eq!(for_terminal("a\nb", false), "a\\nb");
+    }
 }
