@@ -35,6 +35,10 @@
               <button id="add-file" class="btn btn-secondary">+ Añadir archivo</button>
             </div>
             <ul id="item-list" class="item-list"></ul>
+            <div id="usage" class="usage" hidden>
+              <div class="usage-bar"><div id="usage-fill" class="usage-fill"></div></div>
+              <span id="usage-text" class="usage-text" aria-live="polite"></span>
+            </div>
 
             <details class="message-box">
               <summary>Añadir un mensaje de texto</summary>
@@ -45,21 +49,26 @@
           </li>
 
           <li class="step">
-            <h2>Paso 3 — Contraseña y modo</h2>
+            <h2>Paso 3 — Modo y contraseña</h2>
+            <fieldset class="modes">
+              <legend class="sr-only">Modo de ocultación</legend>
+              <label class="mode-card">
+                <input type="radio" name="mode" value="append" checked />
+                <span class="mode-title">Crece <code>append</code></span>
+                <span class="mode-desc">Cualquier archivo. Los datos se añaden al final y el archivo pesa más.</span>
+                <span class="mode-warn">En PNG, JPEG, PDF o ZIP se nota que sobran datos (no qué son).</span>
+              </label>
+              <label class="mode-card">
+                <input type="radio" name="mode" value="lsb" />
+                <span class="mode-title">Mismas dimensiones <code>LSB</code></span>
+                <span class="mode-desc">Solo PNG/BMP. Repartido por toda la imagen: más discreto.</span>
+                <span class="mode-warn">Cabe poco, y la salida siempre es PNG.</span>
+              </label>
+            </fieldset>
             <div class="row">
               <input id="password" type="password" placeholder="Contraseña" aria-label="Contraseña" autocomplete="new-password" />
               <input id="password2" type="password" placeholder="Repite la contraseña" aria-label="Repite la contraseña" autocomplete="new-password" />
             </div>
-            <div class="row mode-row">
-              <label><input type="radio" name="mode" value="append" checked /> Modo <b>crece (append)</b> — cualquier archivo, añade los datos al final</label>
-              <label><input type="radio" name="mode" value="lsb" /> Modo <b>mismas dimensiones (LSB)</b> — solo imágenes PNG/BMP</label>
-            </div>
-            <p class="hint">
-              Ojo con el modo <b>crece</b>: en PNG, JPEG, PDF o ZIP cualquiera puede ver que sobran
-              datos después del final del archivo. No sabrá qué son ni podrá leerlos, pero sí que hay
-              algo. En audio y vídeo se nota menos. Para fotos, el modo <b>mismas dimensiones</b> es
-              más discreto.
-            </p>
           </li>
         </ol>
 

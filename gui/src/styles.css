@@ -29,7 +29,8 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 1rem 1.5rem;
+  padding: 0 1.5rem;
+  min-height: 3.5rem;
   border-bottom: 1px solid var(--border);
 }
 
@@ -45,23 +46,28 @@ body {
 
 .tabs {
   display: flex;
-  gap: 0.25rem;
+  gap: 1.25rem;
+  align-self: stretch;
 }
 
+/* Subrayadas, no rellenas: rellenas parecían botones de acción. */
 .tab-btn {
   background: transparent;
-  border: 1px solid var(--border);
+  border: none;
+  border-bottom: 2px solid transparent;
   color: var(--text-dim);
-  padding: 0.4rem 0.9rem;
-  border-radius: 6px;
+  padding: 0 0.1rem;
   cursor: pointer;
-  font-size: 0.85rem;
+  font-size: 0.9rem;
+}
+
+.tab-btn:hover {
+  color: var(--text);
 }
 
 .tab-btn.active {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: #0c0e12;
+  color: var(--text);
+  border-bottom-color: var(--accent);
   font-weight: 600;
 }
 
@@ -114,13 +120,6 @@ main {
   gap: 0.6rem;
   align-items: center;
   flex-wrap: wrap;
-}
-
-.mode-row {
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 0.4rem;
-  font-size: 0.85rem;
 }
 
 input[type="text"],
@@ -220,12 +219,137 @@ label:has(input:disabled) {
   font-size: 0.85rem;
 }
 
+.item-list li.empty {
+  background: transparent;
+  border-style: dashed;
+  color: var(--text-dim);
+  justify-content: center;
+}
+
 .item-list button {
   background: transparent;
   border: none;
   color: var(--err);
   cursor: pointer;
   font-size: 0.85rem;
+}
+
+/* Barra "usado / capacidad" (solo modo LSB). */
+.usage {
+  margin-top: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+/* `display: flex` de arriba pisaría al atributo `hidden` (la regla del
+   navegador pierde contra la nuestra): hay que repetirlo. */
+.usage[hidden] {
+  display: none;
+}
+
+.usage-bar {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--panel-2);
+  overflow: hidden;
+}
+
+.usage-fill {
+  height: 100%;
+  background: var(--accent);
+  transition: width 0.2s;
+}
+
+.usage-text {
+  font-size: 0.78rem;
+  color: var(--text-dim);
+}
+
+.usage.over .usage-fill {
+  background: var(--err);
+}
+
+.usage.over .usage-text {
+  color: var(--err);
+}
+
+/* Modos: dos tarjetas elegibles en vez de dos líneas con un radio. */
+.modes {
+  border: none;
+  margin: 0 0 1rem 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.75rem;
+}
+
+.mode-card {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  column-gap: 0.6rem;
+  row-gap: 0.25rem;
+  align-items: start;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.75rem 0.9rem;
+  cursor: pointer;
+}
+
+.mode-card:hover {
+  border-color: var(--text-dim);
+}
+
+.mode-card:has(input:checked) {
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+.mode-card input {
+  grid-row: span 3;
+  margin: 0.2rem 0 0 0;
+  accent-color: var(--accent);
+}
+
+.mode-title {
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+
+.mode-title code {
+  font-size: 0.75rem;
+  color: var(--text-dim);
+  margin-left: 0.3rem;
+}
+
+.mode-desc {
+  font-size: 0.8rem;
+  color: var(--text-dim);
+}
+
+.mode-warn {
+  font-size: 0.75rem;
+  color: #fbbf24;
+}
+
+.mode-warn::before {
+  content: "⚠ ";
+}
+
+@media (max-width: 560px) {
+  .modes {
+    grid-template-columns: 1fr;
+  }
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
 }
 
 .message-box {

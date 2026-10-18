@@ -137,6 +137,15 @@ fn is_lsb_carrier(carrier_path: String) -> bool {
     oursecret_core::is_lsb_carrier(&PathBuf::from(carrier_path))
 }
 
+/// Tamaño de un archivo a esconder, para la barra "usado / capacidad" de
+/// la GUI antes de intentar esconder (y fallar por falta de sitio).
+#[tauri::command(async)]
+fn file_size(path: String) -> Result<u64, String> {
+    std::fs::metadata(&path)
+        .map(|m| m.len())
+        .map_err(|e| e.to_string())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -145,7 +154,8 @@ pub fn run() {
             hide_items,
             extract_items,
             lsb_capacity,
-            is_lsb_carrier
+            is_lsb_carrier,
+            file_size
         ])
         .run(tauri::generate_context!())
         .expect("error al arrancar la aplicación Tauri");

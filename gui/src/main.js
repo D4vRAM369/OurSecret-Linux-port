@@ -18,7 +18,8 @@ document.querySelectorAll(".tab-btn").forEach((btn) => {
 
 // ---------- Estado del flujo "Esconder" ----------
 let carrierPath = null;
-let items = []; // [{kind:'file', path, label} | {kind:'message', subject, text}]
+let carrierCapacity = null; // bytes en modo LSB; null si el portador no es imagen
+let items = []; // [{kind:'file', path, label, size} | {kind:'message', subject, text}]
 
 const carrierNameEl = document.getElementById("carrier-name");
 const carrierInfoEl = document.getElementById("carrier-info");
@@ -36,6 +37,7 @@ document.getElementById("pick-carrier").addEventListener("click", async () => {
   // Se vacía ANTES de preguntar: si algo falla a mitad, no puede quedar a la
   // vista la información del portador anterior junto al nombre del nuevo.
   carrierInfoEl.textContent = "Analizando…";
+  carrierCapacity = null;
 
   try {
     const isImage = await invoke("is_lsb_carrier", { carrierPath });
@@ -44,22 +46,27 @@ document.getElementById("pick-carrier").addEventListener("click", async () => {
     lsbRadio.disabled = !isImage;
     if (!isImage && lsbRadio.checked) appendRadio.checked = true;
     if (isImage) {
-      const cap = await invoke("lsb_capacity", { carrierPath });
-      carrierInfoEl.textContent = `Imagen compatible con el modo mismas dimensiones (LSB): caben ${cap} bytes para un archivo que no comprime (fotos, zips, vídeos); con varios, ~170 bytes menos por cada uno extra.`;
+      carrierCapacity = await invoke("lsb_capacity", { carrierPath });
+      carrierInfoEl.textContent = `Imagen PNG/BMP: admite los dos modos. En mismas dimensiones (LSB) caben ~${formatBytes(carrierCapacity)}.`;
     } else {
       carrierInfoEl.textContent = "No es una imagen PNG/BMP: solo está disponible el modo crece (append).";
     }
   } catch (err) {
     carrierInfoEl.textContent = `No se pudo analizar el portador: ${err}`;
   }
+  updateUsage();
 });
+
+document.querySelectorAll('input[name="mode"]').forEach((r) => r.addEventListener("change", updateUsage));
 
 document.getElementById("add-file").addEventListener("click", async () => {
   const picked = await open({ multiple: true, title: "Elige archivo(s) a esconder" });
   if (!picked) return;
   const paths = Array.isArray(picked) ? picked : [picked];
   for (const p of paths) {
-    items.push({ kind: "file", path: p, label: basename(p) });
+    // Sin tamaño (null) el archivo se esconde igual; solo falta en la barra.
+    const size = await invoke("file_size", { path: p }).catch(() => null);
+    items.push({ kind: "file", path: p, label: basename(p), size });
   }
   renderItems();
 });
@@ -80,10 +87,18 @@ document.getElementById("add-message").addEventListener("click", () => {
 
 function renderItems() {
   itemListEl.replaceChildren();
+  if (items.length === 0) {
+    const li = document.createElement("li");
+    li.className = "empty";
+    li.textContent = "Todavía no has añadido nada.";
+    itemListEl.appendChild(li);
+  }
   items.forEach((item, idx) => {
     const li = document.createElement("li");
     const label =
-      item.kind === "file" ? `📄 ${item.label}` : `✉️ Mensaje: "${item.subject}"`;
+      item.kind === "file"
+        ? `📄 ${item.label}${item.size != null ? ` · ${formatBytes(item.size)}` : ""}`
+        : `✉️ Mensaje: "${item.subject}"`;
     // textContent, nunca innerHTML: el nombre de un archivo del disco puede
     // contener "<img onerror=...>" y se ejecutaría como código.
     const span = document.createElement("span");
@@ -99,6 +114,35 @@ function renderItems() {
     li.appendChild(removeBtn);
     itemListEl.appendChild(li);
   });
+  updateUsage();
+}
+
+// Barra "usado / capacidad", solo en modo LSB, que es el que tiene tope.
+// Estimación pesimista: tamaños sin comprimir; `lsb_capacity` ya descuenta
+// el sobrecoste del primer item y cada uno extra suma ~170 bytes (core).
+const usageEl = document.getElementById("usage");
+const usageFillEl = document.getElementById("usage-fill");
+const usageTextEl = document.getElementById("usage-text");
+const enc = new TextEncoder();
+
+function updateUsage() {
+  const show = carrierCapacity != null && lsbRadio.checked && items.length > 0;
+  usageEl.hidden = !show;
+  if (!show) return;
+  const unknown = items.some((it) => it.kind === "file" && it.size == null);
+  const used =
+    items.reduce(
+      (sum, it) =>
+        sum + (it.kind === "file" ? it.size ?? 0 : enc.encode(`${it.subject}\n${it.text}`).length),
+      0
+    ) +
+    170 * (items.length - 1);
+  const over = used > carrierCapacity;
+  usageEl.classList.toggle("over", over);
+  usageFillEl.style.width = `${Math.min(100, (used / carrierCapacity) * 100)}%`;
+  usageTextEl.textContent = over
+    ? `No cabe: ~${formatBytes(used)} de ~${formatBytes(carrierCapacity)}. Quita algo o usa el modo crece.`
+    : `~${formatBytes(used)} de ~${formatBytes(carrierCapacity)}${unknown ? " (sin contar algún archivo ilegible)" : ""}`;
 }
 
 // ---------- Esconder ----------
@@ -242,6 +286,13 @@ function textDiv(className, text) {
   return d;
 }
 
+function formatBytes(n) {
+  const fmt = (x) => x.toLocaleString("es", { maximumFractionDigits: 1 });
+  if (n < 1024) return `${n} bytes`;
+  if (n < 1024 * 1024) return `${fmt(n / 1024)} KB`;
+  return `${fmt(n / (1024 * 1024))} MB`;
+}
+
 function basename(path) {
   return path.split(/[\\/]/).pop();
 }
@@ -258,3 +309,5 @@ function showResult(el, message, ok) {
   el.className = `result ${ok ? "ok" : "err"}`;
   el.textContent = message;
 }
+
+renderItems();
