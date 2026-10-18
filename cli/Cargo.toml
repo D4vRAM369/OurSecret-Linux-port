@@ -14,4 +14,3 @@ oursecret-core = { path = "../core" }
 clap = { version = "4", features = ["derive"] }
 rpassword = "7"
 anyhow = "1"
-image = { version = "0.24", default-features = false, features = ["png", "bmp"] }

@@ -75,6 +75,31 @@ pub fn hide(
     Ok(())
 }
 
+/// Bytes de **contenido del usuario** que caben en modo LSB en esta imagen,
+/// suponiendo un solo archivo con nombre de hasta 32 caracteres y datos que
+/// no comprimen (el peor caso: fotos, zips, vídeos). Redondea a la baja: si
+/// el contenido comprime, cabrá algo más; con varios items, cada uno resta
+/// ~170 bytes más.
+///
+/// No es `embed::lsb::capacity_bytes`: esa cuenta el hueco para el payload
+/// ya cifrado. Entre el archivo del usuario y ese hueco hay dos capas que
+/// también ocupan sitio (medido con `bundle::pack` y datos aleatorios):
+/// - cifrado: nonce (12) + tag GCM (16) = 28 bytes;
+/// - zip: ~101 bytes fijos + 2 × longitud del nombre (cabecera local y
+///   directorio central) + ~5 bytes por cada bloque DEFLATE (~32 KiB).
+pub fn lsb_capacity(carrier_path: &Path) -> Result<usize> {
+    const FIXED: usize = 28 + 101 + 2 * 32 + 7; // 7 de margen → 200
+    let payload = embed::lsb::capacity_bytes(&image::open(carrier_path)?);
+    let avail = payload.saturating_sub(FIXED);
+    // ponytail: 1 byte por cada 4 KiB cubre los ~5 por 32 KiB de DEFLATE con margen.
+    Ok(avail - avail / 4096)
+}
+
+/// Si `carrier_path` es una imagen PNG/BMP que el modo LSB puede usar.
+pub fn is_lsb_carrier(carrier_path: &Path) -> bool {
+    image::open(carrier_path).is_ok()
+}
+
 /// Extrae y descifra los items escondidos en `stego_path` con `password`.
 /// Detecta automáticamente si el archivo usa el modo `Append` (intenta
 /// primero, es instantáneo) o `Lsb` (si el primero falla y el archivo es
@@ -253,6 +278,41 @@ mod tests {
         let missing = dir.path().join("no-existe.png");
         let err = hide(&missing, &items, "pw", EmbedMode::Lsb, &out).unwrap_err();
         assert!(matches!(err, OurSecretError::Io(_)), "{err:?}");
+    }
+
+    #[test]
+    fn lsb_capacity_is_what_really_fits() {
+        use rand::RngCore;
+        let dir = tempfile::tempdir().unwrap();
+        let carrier = dir.path().join("c.png");
+        let out = dir.path().join("o.png");
+        // 32×32: el caso del informe (anunciaba 364, cabían ~225).
+        // 600×600: lo bastante grande para que cuente el sobrecoste de DEFLATE.
+        for side in [32u32, 600] {
+            image::DynamicImage::ImageRgb8(image::ImageBuffer::from_fn(side, side, |x, y| {
+                image::Rgb([(x * 7 + y) as u8, x as u8, y as u8])
+            }))
+            .save(&carrier)
+            .unwrap();
+            let cap = lsb_capacity(&carrier).unwrap();
+            let file = |len: usize| {
+                let mut data = vec![0u8; len];
+                rand::thread_rng().fill_bytes(&mut data); // no comprime: peor caso
+                [Item::File {
+                    name: "n".repeat(32),
+                    data,
+                }]
+            };
+            // Lo anunciado cabe de verdad...
+            hide(&carrier, &file(cap), "pw", EmbedMode::Lsb, &out)
+                .unwrap_or_else(|e| panic!("{side}px: anuncia {cap} y no cabe: {e}"));
+            // ...y no se queda muy corto: un 1 % + 64 bytes más ya no cabe.
+            let over = cap + cap / 100 + 64;
+            assert!(
+                hide(&carrier, &file(over), "pw", EmbedMode::Lsb, &out).is_err(),
+                "{side}px: {over} bytes también caben, la cifra es demasiado pesimista"
+            );
+        }
     }
 
     #[test]

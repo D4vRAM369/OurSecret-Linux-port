@@ -8,7 +8,7 @@ use thiserror::Error;
 /// que un error tipado permite `match` en las capas de arriba.
 #[derive(Debug, Error)]
 pub enum OurSecretError {
-    #[error("el archivo portador no tiene espacio suficiente: necesita {needed} bytes, tiene capacidad para {available}")]
+    #[error("no cabe en el portador: el contenido, ya empaquetado y cifrado, ocupa {needed} bytes y solo hay sitio para {available}")]
     InsufficientCapacity { needed: usize, available: usize },
 
     #[error("contraseña incorrecta o datos ocultos corruptos")]

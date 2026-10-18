@@ -116,15 +116,14 @@ fn extract_items(
 /// usuario antes de que intente esconder algo demasiado grande.
 #[tauri::command]
 fn lsb_capacity(carrier_path: String) -> Result<usize, String> {
-    let img = image::open(&carrier_path).map_err(|e| e.to_string())?;
-    Ok(oursecret_core::embed::lsb::capacity_bytes(&img))
+    oursecret_core::lsb_capacity(&PathBuf::from(carrier_path)).map_err(|e| e.to_string())
 }
 
 /// Si `carrier_path` es una imagen PNG/BMP válida — decide si ofrecer el
 /// modo LSB en la interfaz o dejar solo el modo `append`.
 #[tauri::command]
 fn is_image_carrier(carrier_path: String) -> bool {
-    image::open(&carrier_path).is_ok()
+    oursecret_core::is_lsb_carrier(&PathBuf::from(carrier_path))
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]

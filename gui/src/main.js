@@ -48,7 +48,7 @@ document.getElementById("pick-carrier").addEventListener("click", async () => {
   }
   if (isImage) {
     const cap = await invoke("lsb_capacity", { carrierPath });
-    carrierInfoEl.textContent = `Es una imagen compatible con el modo LSB — capacidad aproximada: ${cap} bytes (antes de cifrar/comprimir).`;
+    carrierInfoEl.textContent = `Es una imagen compatible con el modo LSB — caben ${cap} bytes para un archivo que no comprime (fotos, zips, vídeos); con varios, ~170 bytes menos por cada uno extra.`;
   } else {
     carrierInfoEl.textContent = "No es una imagen PNG/BMP — solo estará disponible el modo 'crece'.";
   }

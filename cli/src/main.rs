@@ -194,9 +194,9 @@ fn for_terminal(s: &str, keep_newlines: bool) -> String {
 }
 
 fn cmd_capacity(carrier: PathBuf) -> Result<()> {
-    let img = image::open(&carrier).with_context(|| format!("abriendo {}", carrier.display()))?;
-    let cap = oursecret_core::embed::lsb::capacity_bytes(&img);
-    println!("Capacidad en modo LSB: ~{cap} bytes (antes de cifrar/comprimir)");
+    let cap = oursecret_core::lsb_capacity(&carrier)
+        .with_context(|| format!("abriendo {}", carrier.display()))?;
+    println!("Capacidad en modo LSB: {cap} bytes para un archivo que no comprime (fotos, zips, vídeos); con varios, ~170 bytes menos por cada uno extra");
     Ok(())
 }
 
