@@ -56,7 +56,14 @@ pub fn pack(items: &[Item]) -> Result<Vec<u8>> {
                 }
                 Item::Message { subject, text } => {
                     // Guardamos subject y text como dos líneas: la primera
-                    // es el asunto, el resto es el cuerpo del mensaje.
+                    // es el asunto, el resto es el cuerpo del mensaje. Por
+                    // eso el asunto no puede llevar '\n': `unpack` cortaría
+                    // ahí y movería el resto al cuerpo sin avisar.
+                    if subject.contains('\n') {
+                        return Err(OurSecretError::InvalidInput(
+                            "el asunto de un mensaje no puede tener saltos de línea",
+                        ));
+                    }
                     let safe_subject = sanitize_filename(subject);
                     let entry_name = format!("{MESSAGE_PREFIX}{safe_subject}.txt");
                     writer.start_file(entry_name, options)?;
@@ -195,6 +202,21 @@ mod tests {
         assert_eq!(unpacked_limit(0), MIN_UNPACKED_LIMIT);
         assert_eq!(unpacked_limit(1_000), MIN_UNPACKED_LIMIT);
         assert_eq!(unpacked_limit(100 << 20), 20 * (100 << 20)); // blob de 100 MiB → 2000 MiB
+    }
+
+    #[test]
+    fn pack_rejects_multiline_subject() {
+        let msg = |subject: &str| Item::Message {
+            subject: subject.into(),
+            text: "cuerpo".into(),
+        };
+        assert!(matches!(
+            pack(&[msg("linea1\nlinea2")]),
+            Err(OurSecretError::InvalidInput(_))
+        ));
+        // Un asunto sin '\n' (aunque lleve ':' o '\r') sigue haciendo roundtrip.
+        let ok = [msg("a:b\rc")];
+        assert_eq!(unpack(&pack(&ok).unwrap()).unwrap(), ok);
     }
 
     #[test]

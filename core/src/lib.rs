@@ -45,6 +45,12 @@ pub fn hide(
     mode: EmbedMode,
     output_path: &Path,
 ) -> Result<()> {
+    // Aquí y no en la CLI/GUI: así ninguna puerta de entrada se la salta.
+    if password.is_empty() {
+        return Err(OurSecretError::InvalidInput(
+            "la contraseña no puede estar vacía",
+        ));
+    }
     let plain_blob = bundle::pack(items)?;
 
     match mode {
@@ -206,6 +212,21 @@ mod tests {
             std::fs::write(&path, stego).unwrap();
             assert!(read(&path, "pw").is_err(), "blob={blob:?}");
         }
+    }
+
+    #[test]
+    fn hide_rejects_empty_password() {
+        let dir = tempfile::tempdir().unwrap();
+        let carrier = dir.path().join("c.bin");
+        let out = dir.path().join("o.bin");
+        std::fs::write(&carrier, b"portador").unwrap();
+        let items = [Item::File {
+            name: "a".into(),
+            data: vec![1],
+        }];
+        let err = hide(&carrier, &items, "", EmbedMode::Append, &out).unwrap_err();
+        assert!(matches!(err, OurSecretError::InvalidInput(_)));
+        assert!(!out.exists(), "no debe escribir nada");
     }
 
     #[test]

@@ -54,9 +54,6 @@ fn hide_items(
     password: String,
     mode: String,
 ) -> Result<(), String> {
-    if password.is_empty() {
-        return Err("la contraseña no puede estar vacía".into());
-    }
     if items.is_empty() {
         return Err("no hay nada que esconder: añade al menos un archivo o un mensaje".into());
     }

@@ -206,9 +206,6 @@ fn prompt_password_with_confirmation() -> Result<String> {
     if p1 != p2 {
         bail!("las contraseñas no coinciden");
     }
-    if p1.is_empty() {
-        bail!("la contraseña no puede estar vacía");
-    }
     Ok(p1)
 }
 
