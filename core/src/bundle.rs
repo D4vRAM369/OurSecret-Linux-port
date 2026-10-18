@@ -9,7 +9,20 @@ use std::io::{Cursor, Read, Write};
 use zip::write::FileOptions;
 use zip::{CompressionMethod, ZipArchive, ZipWriter};
 
-use crate::error::Result;
+use crate::error::{OurSecretError, Result};
+
+/// Presupuesto mínimo de bytes descomprimidos, por pequeño que sea el blob.
+const MIN_UNPACKED_LIMIT: u64 = 256 * 1024 * 1024;
+/// Cuántas veces su propio tamaño puede "crecer" un blob grande al
+/// descomprimirse. Texto y logs reales comprimen 3–20:1; DEFLATE permite
+/// hasta ~1000:1, que es justo lo que explota una zip bomb.
+const MAX_RATIO: u64 = 20;
+
+/// Cuántos bytes descomprimidos en total se aceptan para un blob de
+/// `blob_len` bytes: max(256 MiB, 20 × blob_len).
+fn unpacked_limit(blob_len: usize) -> u64 {
+    MIN_UNPACKED_LIMIT.max((blob_len as u64).saturating_mul(MAX_RATIO))
+}
 
 /// Un elemento a ocultar: o bien un archivo (con su nombre y bytes), o
 /// bien un mensaje de texto corto con un "asunto" — igual que el diálogo
@@ -59,9 +72,19 @@ pub fn pack(items: &[Item]) -> Result<Vec<u8>> {
 }
 
 /// Desempaqueta el zip en memoria de vuelta a la lista de items.
+///
+/// Protegido contra zip bombs: el total descomprimido (sumando TODAS las
+/// entradas) no puede pasar de [`unpacked_limit`]. Quien conoce la
+/// contraseña puede cifrar un zip hostil, así que el descifrado correcto
+/// no garantiza nada sobre lo que hay dentro.
 pub fn unpack(blob: &[u8]) -> Result<Vec<Item>> {
+    unpack_with_limit(blob, unpacked_limit(blob.len()))
+}
+
+fn unpack_with_limit(blob: &[u8], limit: u64) -> Result<Vec<Item>> {
     let mut archive = ZipArchive::new(Cursor::new(blob))?;
     let mut items = Vec::with_capacity(archive.len());
+    let mut budget = limit;
 
     for i in 0..archive.len() {
         let mut entry = archive.by_index(i)?;
@@ -72,10 +95,21 @@ pub fn unpack(blob: &[u8]) -> Result<Vec<Item>> {
             .file_name()
             .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_else(|| "archivo".to_string());
-        let mut data = Vec::new();
-        entry.read_to_end(&mut data)?;
+        let is_message = entry.name().starts_with(MESSAGE_PREFIX);
 
-        if entry.name().starts_with(MESSAGE_PREFIX) {
+        // No nos fiamos del tamaño que declara la cabecera del zip (lo
+        // escribió el atacante): contamos lo que de verdad sale del
+        // descompresor. `take(budget + 1)`: si llega a leer un byte más
+        // del presupuesto restante, es que se pasa → paramos ahí, sin
+        // haber reservado más memoria que el presupuesto.
+        let mut data = Vec::new();
+        let read = (&mut entry).take(budget + 1).read_to_end(&mut data)? as u64;
+        if read > budget {
+            return Err(OurSecretError::DecompressionLimit { limit });
+        }
+        budget -= read;
+
+        if is_message {
             let text = String::from_utf8_lossy(&data);
             let mut parts = text.splitn(2, '\n');
             let subject = parts.next().unwrap_or_default().to_string();
@@ -125,6 +159,42 @@ mod tests {
         for item in unpack(&pack(&items).unwrap()).unwrap() {
             assert!(matches!(item, Item::File { ref name, .. } if name == "escapado.txt"));
         }
+    }
+
+    fn zeros(name: &str, len: usize) -> Item {
+        Item::File {
+            name: name.into(),
+            data: vec![0u8; len],
+        }
+    }
+
+    #[test]
+    fn decompression_budget_stops_zip_bombs() {
+        // 100 KB de ceros comprimen a ~100 bytes (ratio ~1000:1, como una bomba).
+        let bomb = pack(&[zeros("bomba.bin", 100_000)]).unwrap();
+        assert!(
+            bomb.len() < 1_000,
+            "debería comprimir muchísimo: {}",
+            bomb.len()
+        );
+        let err = unpack_with_limit(&bomb, 50_000).unwrap_err();
+        assert!(matches!(
+            err,
+            OurSecretError::DecompressionLimit { limit: 50_000 }
+        ));
+
+        // El presupuesto es para la SUMA de entradas: 3 × 400 no caben en 1000…
+        let many = pack(&[zeros("a", 400), zeros("b", 400), zeros("c", 400)]).unwrap();
+        assert!(unpack_with_limit(&many, 1_000).is_err());
+        // …pero justo en el límite sí.
+        assert_eq!(unpack_with_limit(&many, 1_200).unwrap().len(), 3);
+    }
+
+    #[test]
+    fn unpacked_limit_has_floor_and_ratio() {
+        assert_eq!(unpacked_limit(0), MIN_UNPACKED_LIMIT);
+        assert_eq!(unpacked_limit(1_000), MIN_UNPACKED_LIMIT);
+        assert_eq!(unpacked_limit(100 << 20), 20 * (100 << 20)); // blob de 100 MiB → 2000 MiB
     }
 
     #[test]

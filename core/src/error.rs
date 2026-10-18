@@ -20,6 +20,9 @@ pub enum OurSecretError {
     #[error("el modo 'keep same size' (LSB) solo funciona con imágenes PNG o BMP sin comprimir con pérdida; este portador no es una de ellas: {0}")]
     UnsupportedCarrierForLsb(String),
 
+    #[error("el contenido oculto se descomprime a más de {limit} bytes (posible zip bomb); extracción detenida")]
+    DecompressionLimit { limit: u64 },
+
     #[error("error de E/S: {0}")]
     Io(#[from] std::io::Error),
 
