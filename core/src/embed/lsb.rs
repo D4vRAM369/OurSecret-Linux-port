@@ -132,8 +132,10 @@ pub fn extract(img: &DynamicImage, password: &str) -> Result<Vec<u8>> {
     let payload_len = (u32_of_bits(&len_bits) ^ mask_u32(&key)) as usize;
 
     // Si la longitud no cabe o es absurda: no es nuestro (o clave mala).
+    // `payload_len > avail / 8` equivale a `payload_len * 8 > avail` pero sin
+    // multiplicar un valor que viene del archivo (en 32 bits desbordaría).
     let avail = raw.len() - OVERHEAD_BITS;
-    if payload_len < MIN_PAYLOAD || payload_len * 8 > avail {
+    if payload_len < MIN_PAYLOAD || payload_len > avail / 8 {
         return Err(OurSecretError::NotAContainer);
     }
 
@@ -264,6 +266,50 @@ mod tests {
             })
             .collect();
         assert_eq!(results, [99u8, 101].into_iter().collect());
+    }
+
+    /// Imagen cuyos LSB dicen: sal = ceros, longitud descifrada con "pw" =
+    /// `claimed`. El resto de píxeles, basura. Así se prueban los valores
+    /// límite *después* de la KDF, que bytes al azar casi nunca alcanzan.
+    fn crafted(w: u32, h: u32, key: &[u8; KEY_LEN], claimed: u32) -> DynamicImage {
+        let mut raw: Vec<u8> = (0..w * h * 3).map(|i| (i * 37 % 251) as u8).collect();
+        for b in raw.iter_mut().take(SALT_BITS) {
+            *b &= 0b1111_1110; // sal = 16 bytes a cero
+        }
+        for (i, bit) in bits_of_u32(claimed ^ mask_u32(key)).into_iter().enumerate() {
+            raw[SALT_BITS + i] = (raw[SALT_BITS + i] & 0b1111_1110) | bit;
+        }
+        DynamicImage::ImageRgb8(ImageBuffer::from_raw(w, h, raw).unwrap())
+    }
+
+    #[test]
+    fn hostile_input_errors_instead_of_panicking() {
+        // Demasiado pequeñas para la cabecera (160 bits): error antes de la KDF.
+        for (w, h) in [(0, 0), (1, 1), (7, 7)] {
+            let img = DynamicImage::ImageRgb8(ImageBuffer::new(w, h));
+            assert!(extract(&img, "pw").is_err(), "{w}x{h}");
+        }
+
+        let key = crypto::derive_key("pw", &[0u8; SALT_LEN]).unwrap();
+        let (w, h) = (20u32, 20u32);
+        let max = ((w * h * 3) as usize - OVERHEAD_BITS) / 8; // payload máximo que cabe
+        for claimed in [
+            0,
+            MIN_PAYLOAD as u32 - 1,
+            MIN_PAYLOAD as u32, // pasa el filtro → GCM rechaza la basura
+            max as u32,         // justo en el límite → idem
+            max as u32 + 1,     // un byte de más
+            u32::MAX,           // ×8 desbordaría en 32 bits
+        ] {
+            let err = extract(&crafted(w, h, &key, claimed), "pw").unwrap_err();
+            assert!(
+                matches!(
+                    err,
+                    OurSecretError::NotAContainer | OurSecretError::DecryptionFailed
+                ),
+                "claimed={claimed}: {err:?}"
+            );
+        }
     }
 
     #[test]

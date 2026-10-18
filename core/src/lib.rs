@@ -191,6 +191,24 @@ mod tests {
     }
 
     #[test]
+    fn valid_encryption_of_garbage_errors_instead_of_panicking() {
+        // Quien conoce la contraseña puede cifrar CUALQUIER cosa, no solo un
+        // zip bien formado: `bundle::unpack` también es superficie hostil.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("stego.bin");
+        for blob in [
+            &b""[..],
+            b"no soy un zip",
+            b"PK\x03\x04truncado",
+            &[0xFFu8; 300],
+        ] {
+            let stego = embed::append::embed(b"portador", blob, "pw").unwrap();
+            std::fs::write(&path, stego).unwrap();
+            assert!(read(&path, "pw").is_err(), "blob={blob:?}");
+        }
+    }
+
+    #[test]
     fn save_extracted_file_never_overwrites() {
         let dir = tempfile::tempdir().unwrap();
         let victim = dir.path().join(".bashrc");

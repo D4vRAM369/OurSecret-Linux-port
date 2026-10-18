@@ -11,3 +11,12 @@ lto = true
 opt-level = 3
 panic = "abort"
 strip = true
+
+# Argon2id a 64 MiB / t=3 sin optimizar tarda ~0,4 s por llamada, y los tests
+# la llaman decenas de veces. Optimizar solo esas dependencias en `dev` deja
+# los tests rápidos sin perder la depuración de nuestro propio código.
+[profile.dev.package.argon2]
+opt-level = 3
+
+[profile.dev.package.blake2]
+opt-level = 3

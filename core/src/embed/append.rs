@@ -131,6 +131,42 @@ mod tests {
     }
 
     #[test]
+    fn hostile_input_errors_instead_of_panicking() {
+        // Todos los tamaños alrededor del mínimo (antes y justo después de la KDF).
+        for len in 0..=MIN_PAYLOAD + TAIL_LEN + 1 {
+            let junk: Vec<u8> = (0..len).map(|i| (i * 37 % 251) as u8).collect();
+            assert!(extract(&junk, "pw").is_err(), "len={len}");
+        }
+
+        // Trailer fabricado para que la longitud descifrada con "pw" sea
+        // `claimed`: así se prueban los límites que bytes al azar no alcanzan.
+        let total = 200;
+        let salt = [3u8; SALT_LEN];
+        let mask = mask_u64(&crypto::derive_key("pw", &salt).unwrap());
+        let salt_start = (total - TAIL_LEN) as u64;
+        for claimed in [
+            0,
+            MIN_PAYLOAD as u64 - 1,
+            MIN_PAYLOAD as u64, // pasa el filtro → GCM rechaza la basura
+            salt_start,         // payload = todo el archivo → idem
+            salt_start + 1,     // empezaría antes del byte 0
+            u64::MAX,           // restar desbordaría
+        ] {
+            let mut stego = vec![0xA5u8; total];
+            stego[total - TAIL_LEN..total - TRAILER_LEN].copy_from_slice(&salt);
+            stego[total - TRAILER_LEN..].copy_from_slice(&(claimed ^ mask).to_le_bytes());
+            let err = extract(&stego, "pw").unwrap_err();
+            assert!(
+                matches!(
+                    err,
+                    OurSecretError::NotAContainer | OurSecretError::DecryptionFailed
+                ),
+                "claimed={claimed}: {err:?}"
+            );
+        }
+    }
+
+    #[test]
     fn extract_on_unrelated_file_fails_cleanly() {
         let err = extract(b"un archivo cualquiera sin nada oculto", "x").unwrap_err();
         assert!(matches!(
