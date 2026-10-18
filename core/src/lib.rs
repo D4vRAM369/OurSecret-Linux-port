@@ -60,7 +60,12 @@ pub fn hide(
             std::fs::write(output_path, stego)?;
         }
         EmbedMode::Lsb => {
-            let img = image::open(carrier_path)?;
+            // Un error de E/S (no existe, sin permisos) se queda como Io; todo
+            // lo demás significa "esto no es un PNG/BMP que sepamos leer".
+            let img = image::open(carrier_path).map_err(|e| match e {
+                image::ImageError::IoError(io) => OurSecretError::Io(io),
+                other => OurSecretError::UnsupportedCarrierForLsb(other.to_string()),
+            })?;
             // La comprobación de capacidad vive dentro de lsb::embed (devuelve
             // InsufficientCapacity con las cifras exactas).
             let stego_img = embed::lsb::embed(&img, &plain_blob, password)?;
@@ -227,6 +232,27 @@ mod tests {
         let err = hide(&carrier, &items, "", EmbedMode::Append, &out).unwrap_err();
         assert!(matches!(err, OurSecretError::InvalidInput(_)));
         assert!(!out.exists(), "no debe escribir nada");
+    }
+
+    #[test]
+    fn lsb_on_non_image_carrier_says_why() {
+        let dir = tempfile::tempdir().unwrap();
+        let carrier = dir.path().join("notas.txt");
+        let out = dir.path().join("o.png");
+        std::fs::write(&carrier, b"esto no es una imagen").unwrap();
+        let items = [Item::File {
+            name: "a".into(),
+            data: vec![1],
+        }];
+        let err = hide(&carrier, &items, "pw", EmbedMode::Lsb, &out).unwrap_err();
+        assert!(
+            matches!(err, OurSecretError::UnsupportedCarrierForLsb(_)),
+            "{err:?}"
+        );
+        // Si el archivo no existe, sigue siendo un error de E/S, no "no es imagen".
+        let missing = dir.path().join("no-existe.png");
+        let err = hide(&missing, &items, "pw", EmbedMode::Lsb, &out).unwrap_err();
+        assert!(matches!(err, OurSecretError::Io(_)), "{err:?}");
     }
 
     #[test]

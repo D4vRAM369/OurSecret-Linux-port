@@ -17,7 +17,7 @@ pub enum OurSecretError {
     #[error("no se encontraron datos ocultos (o la contraseña es incorrecta)")]
     NotAContainer,
 
-    #[error("el modo 'keep same size' (LSB) solo funciona con imágenes PNG o BMP sin comprimir con pérdida; este portador no es una de ellas: {0}")]
+    #[error("el modo LSB solo funciona con imágenes PNG o BMP y este portador no lo es (usa el modo append): {0}")]
     UnsupportedCarrierForLsb(String),
 
     #[error("{0}")]

@@ -39,6 +39,13 @@ document.getElementById("pick-carrier").addEventListener("click", async () => {
   carrierNameEl.textContent = basename(picked);
 
   const isImage = await invoke("is_image_carrier", { carrierPath });
+  // LSB solo funciona con PNG/BMP: si no lo es, se desactiva de verdad
+  // (no basta con decirlo en el texto) y se vuelve a "crece".
+  const lsbRadio = document.querySelector('input[name="mode"][value="lsb"]');
+  lsbRadio.disabled = !isImage;
+  if (!isImage && lsbRadio.checked) {
+    document.querySelector('input[name="mode"][value="append"]').checked = true;
+  }
   if (isImage) {
     const cap = await invoke("lsb_capacity", { carrierPath });
     carrierInfoEl.textContent = `Es una imagen compatible con el modo LSB — capacidad aproximada: ${cap} bytes (antes de cifrar/comprimir).`;
