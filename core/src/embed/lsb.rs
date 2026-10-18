@@ -87,11 +87,11 @@ pub fn embed(img: &DynamicImage, plain_blob: &[u8], password: &str) -> Result<Dy
     }
 
     // 3) payload en posiciones permutadas dentro de [160..N).
-    let perm = crypto::permutation(&key, raw.len() - OVERHEAD_BITS);
+    let perm = crypto::permutation(&key, raw.len() - OVERHEAD_BITS, payload.len() * 8);
     let mut bit_idx = 0;
     for &byte in &payload {
         for b in (0..8).rev() {
-            let pos = OVERHEAD_BITS + perm[bit_idx] as usize;
+            let pos = OVERHEAD_BITS + perm[bit_idx];
             set_lsb(&mut raw[pos], (byte >> b) & 1);
             bit_idx += 1;
         }
@@ -134,13 +134,13 @@ pub fn extract(img: &DynamicImage, password: &str) -> Result<Vec<u8>> {
     }
 
     // 3) payload desde las posiciones permutadas.
-    let perm = crypto::permutation(&key, avail);
+    let perm = crypto::permutation(&key, avail, payload_len * 8);
     let mut payload = vec![0u8; payload_len];
     let mut bit_idx = 0;
     for out_byte in payload.iter_mut() {
         let mut v = 0u8;
         for _ in 0..8 {
-            let pos = OVERHEAD_BITS + perm[bit_idx] as usize;
+            let pos = OVERHEAD_BITS + perm[bit_idx];
             v = (v << 1) | get_lsb(raw[pos]);
             bit_idx += 1;
         }

@@ -9,10 +9,13 @@
 //! fuerza bruta con GPU. Este port ofrece un único esquema, moderno y
 //! bien parametrizado, en vez de replicar el menú de opciones original.
 
+use std::collections::HashMap;
+
 use aes_gcm::aead::{Aead, KeyInit, OsRng};
 use aes_gcm::{Aes256Gcm, Key, Nonce};
-use argon2::Argon2;
+use argon2::{Algorithm, Argon2, Params, Version};
 use rand::RngCore;
+use rand::SeedableRng;
 
 use crate::error::{OurSecretError, Result};
 
@@ -22,21 +25,31 @@ pub const NONCE_LEN: usize = 12;
 pub const GCM_TAG_LEN: usize = 16;
 pub const KEY_LEN: usize = 32; // AES-256
 
-/// Deriva una clave AES-256 a partir de una contraseña y una sal, usando
-/// Argon2id con los parámetros por defecto de la librería `argon2` 0.5
-/// (m = 19 MiB, t = 2, p = 1). Ojo: eso es el *mínimo* que recomienda la
-/// OWASP Password Storage Cheat Sheet, no un perfil de RFC 9106 (la RFC
-/// propone t=1,p=4,m=2 GiB o t=3,p=4,m=64 MiB). Medido: ~18 ms por intento
-/// en un Ryzen 5 5600G. Los parámetros no se guardan en el archivo (no hay
-/// cabecera ni versión, a propósito): cambiarlos rompe la lectura de todos
-/// los archivos ya generados.
+/// Parámetros de Argon2id: el segundo perfil de la RFC 9106 §4
+/// ("si no puedes permitirte 2 GiB"): m = 64 MiB, t = 3, p = 4.
+///
+/// Se escriben a mano en vez de usar `Argon2::default()` por dos motivos:
+/// 1. El default de la librería (19 MiB, t=2) es solo el *mínimo* de OWASP.
+/// 2. Un default puede cambiar al actualizar la librería, y como los
+///    parámetros no se guardan en el archivo (no hay cabecera ni versión,
+///    a propósito), eso rompería en silencio todos los archivos existentes.
+///    Fijados aquí + el test `format_is_pinned`, eso no puede pasar sin que
+///    un test falle.
+const ARGON2_M_KIB: u32 = 64 * 1024;
+const ARGON2_T: u32 = 3;
+const ARGON2_P: u32 = 4;
+
+/// Deriva una clave AES-256 a partir de una contraseña y una sal con
+/// Argon2id (parámetros arriba).
 ///
 /// Por qué Argon2id y no PBKDF2/SHA directo: Argon2id está diseñado para
 /// ser caro en memoria además de en CPU, lo que hace mucho más costoso
 /// montar un ataque de fuerza bruta en GPU/ASIC que con un hash simple.
 pub fn derive_key(password: &str, salt: &[u8; SALT_LEN]) -> Result<[u8; KEY_LEN]> {
+    let params = Params::new(ARGON2_M_KIB, ARGON2_T, ARGON2_P, Some(KEY_LEN))
+        .map_err(|e| OurSecretError::Kdf(e.to_string()))?;
     let mut key = [0u8; KEY_LEN];
-    Argon2::default()
+    Argon2::new(Algorithm::Argon2id, Version::V0x13, params)
         .hash_password_into(password.as_bytes(), salt, &mut key)
         .map_err(|e| OurSecretError::Kdf(e.to_string()))?;
     Ok(key)
@@ -50,21 +63,35 @@ pub fn derive_key(password: &str, salt: &[u8; SALT_LEN]) -> Result<[u8; KEY_LEN]
 /// Mismo (clave) => mismo flujo => quien tiene la contraseña reconstruye
 /// máscara y permutación; quien no, ve bytes indistinguibles de ruido.
 pub fn keystream(key: &[u8; KEY_LEN], len: usize) -> Vec<u8> {
-    use rand::SeedableRng;
     let mut rng = rand_chacha::ChaCha20Rng::from_seed(*key);
     let mut out = vec![0u8; len];
     rng.fill_bytes(&mut out);
     out
 }
 
-/// Permutación pseudoaleatoria de `0..count`, determinista por `key`. En
-/// el modo LSB decide EN QUÉ posiciones de la imagen van los bits del secreto:
-/// sin esto, la inserción es secuencial y el ataque chi-cuadrado por
-/// prefijos la detecta y ubica; con posiciones dispersas por toda la
-/// imagen, ese ataque deja de funcionar.
-pub fn permutation(key: &[u8; KEY_LEN], count: usize) -> Vec<u32> {
-    use rand::seq::SliceRandom;
-    use rand::SeedableRng;
+/// Las primeras `k` posiciones de una permutación pseudoaleatoria de
+/// `0..count`, determinista por `key` (todas distintas). En el modo LSB
+/// decide EN QUÉ posiciones de la imagen van los bits del secreto: sin
+/// esto, la inserción es secuencial y el ataque chi-cuadrado por prefijos
+/// la detecta y ubica; con posiciones dispersas por toda la imagen, ese
+/// ataque deja de funcionar.
+///
+/// Es un Fisher-Yates *parcial y disperso*: en vez de crear el array
+/// `0..count` entero y barajarlo (4 bytes por byte de píxel: ~144 MB en una
+/// foto de 12 MP), solo apunta en un `HashMap` las casillas que se han
+/// intercambiado. Memoria O(k), no O(count). Y como Fisher-Yates fija la
+/// posición `i` en el paso `i`, las primeras `k` salen iguales pidas `k` o
+/// pidas más: quien extrae puede pedir exactamente las que necesita.
+///
+/// Escrito a mano (no `SliceRandom::shuffle` ni `gen_range` de `rand`)
+/// porque `rand` no garantiza que esas funciones den el mismo resultado
+/// entre versiones; aquí solo dependemos del flujo ChaCha20, que es un
+/// algoritmo estándar. Lo vigila el test `format_is_pinned`.
+pub fn permutation(key: &[u8; KEY_LEN], count: usize, k: usize) -> Vec<usize> {
+    assert!(
+        k <= count,
+        "no se pueden sacar {k} posiciones distintas de {count}"
+    );
     // Semilla distinta de la del keystream para no correlacionar máscara y
     // permutación (dominio separado: segundo bloque del keystream).
     let mut seed = [0u8; KEY_LEN];
@@ -72,9 +99,46 @@ pub fn permutation(key: &[u8; KEY_LEN], count: usize) -> Vec<u32> {
     rng0.fill_bytes(&mut seed); // descarta el primer bloque (reservado a la máscara)
     rng0.fill_bytes(&mut seed);
     let mut rng = rand_chacha::ChaCha20Rng::from_seed(seed);
-    let mut idx: Vec<u32> = (0..count as u32).collect();
-    idx.shuffle(&mut rng);
-    idx
+    let mut pick_j = |i: usize| i + uniform_below(&mut rng, (count - i) as u64) as usize;
+
+    // Dos caminos, MISMO resultado (lo comprueba `dense_and_sparse_agree`):
+    // - carga grande: array denso de u32 (4 B por posición, como antes);
+    // - carga pequeña: HashMap con solo las casillas tocadas (~40 B cada una,
+    //   como mucho 2k). Con k cerca de count el HashMap gastaría ~10× más.
+    if k.saturating_mul(16) > count && u32::try_from(count).is_ok() {
+        let mut idx: Vec<u32> = (0..count as u32).collect();
+        for i in 0..k {
+            idx.swap(i, pick_j(i));
+        }
+        idx.truncate(k);
+        idx.into_iter().map(|v| v as usize).collect()
+    } else {
+        let mut swapped: HashMap<usize, usize> = HashMap::with_capacity(2 * k);
+        let mut out = Vec::with_capacity(k);
+        for i in 0..k {
+            let j = pick_j(i);
+            let at_i = *swapped.get(&i).unwrap_or(&i);
+            let at_j = *swapped.get(&j).unwrap_or(&j);
+            swapped.insert(j, at_i);
+            out.push(at_j);
+        }
+        out
+    }
+}
+
+/// Número uniforme en `0..n` a partir de bytes crudos de ChaCha20. Rechazo
+/// en vez de un simple `% n`: el módulo favorece a los números pequeños
+/// cuando `n` no divide a 2^64 (sesgo de módulo).
+fn uniform_below(rng: &mut rand_chacha::ChaCha20Rng, n: u64) -> u64 {
+    let zone = u64::MAX - (u64::MAX % n); // múltiplo de n más grande que cabe
+    loop {
+        let mut b = [0u8; 8];
+        rng.fill_bytes(&mut b);
+        let v = u64::from_le_bytes(b);
+        if v < zone {
+            return v % n;
+        }
+    }
 }
 
 pub fn random_salt() -> [u8; SALT_LEN] {
@@ -142,5 +206,50 @@ mod tests {
         let ct = encrypt(&key_good, &nonce, b"secreto").unwrap();
         let result = decrypt(&key_bad, &nonce, &ct);
         assert!(matches!(result, Err(OurSecretError::DecryptionFailed)));
+    }
+
+    #[test]
+    fn permutation_is_distinct_and_in_range() {
+        let key = [7u8; KEY_LEN];
+        for (count, k) in [(1, 1), (10, 10), (1000, 37), (5000, 5000)] {
+            let p = permutation(&key, count, k);
+            assert_eq!(p.len(), k);
+            assert!(p.iter().all(|&x| x < count));
+            let unique: std::collections::HashSet<_> = p.iter().collect();
+            assert_eq!(
+                unique.len(),
+                k,
+                "posiciones repetidas con count={count} k={k}"
+            );
+        }
+    }
+
+    #[test]
+    fn dense_and_sparse_agree() {
+        // k=10 sobre 100_000 va por el camino HashMap; k=50_000 por el denso.
+        // Las 10 primeras tienen que coincidir: si no, extraer (que pide
+        // exactamente las que necesita) leería otras posiciones que embed.
+        let key = [42u8; KEY_LEN];
+        let sparse = permutation(&key, 100_000, 10);
+        let dense = permutation(&key, 100_000, 50_000);
+        assert_eq!(sparse[..], dense[..10]);
+    }
+
+    /// Valores dorados. Si este test falla, el formato ha cambiado y TODOS
+    /// los archivos ya generados dejarán de abrirse. Solo se actualiza a
+    /// propósito (y documentándolo), nunca "para que pase".
+    #[test]
+    fn format_is_pinned() {
+        let key = derive_key("pin", &[1u8; SALT_LEN]).unwrap();
+        assert_eq!(hex(&key[..8]), "3d1a2ff5cf950256");
+        assert_eq!(
+            permutation(&[9u8; KEY_LEN], 1_000_000, 5),
+            [699281, 264395, 803392, 36706, 402497]
+        );
+        assert_eq!(hex(&keystream(&[9u8; KEY_LEN], 8)), "f2a76980dfc7a492");
+    }
+
+    fn hex(b: &[u8]) -> String {
+        b.iter().map(|x| format!("{x:02x}")).collect()
     }
 }
