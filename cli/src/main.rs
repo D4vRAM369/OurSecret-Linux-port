@@ -2,8 +2,8 @@
 //!
 //! Replica, en línea de comandos, el flujo de 3 pasos del programa
 //! original (elegir portador → añadir archivos/mensaje → contraseña) sin
-//! usar ninguno de sus algoritmos propietarios — ver `oursecret-core` y
-//! `docs/02_ARQUITECTURA.md` del proyecto para el diseño completo.
+//! usar ninguno de sus algoritmos propietarios — el diseño está en
+//! `oursecret-core`.
 
 use std::path::PathBuf;
 

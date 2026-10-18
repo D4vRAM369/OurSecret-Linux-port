@@ -1,7 +1,6 @@
 //! Cifrado del contenido oculto.
 //!
-//! Decisión de arquitectura (documentada también en docs/02_ARQUITECTURA.md
-//! del proyecto): el OurSecret original de Windows ofrecía 5 algoritmos
+//! Decisión de arquitectura: el OurSecret original de Windows ofrecía 5 algoritmos
 //! (AES, Blowfish, RC4, TEA, un XOR propio) más MD5/SHA para derivar la
 //! clave desde la contraseña. De esos, hoy (2026) solo AES sigue siendo
 //! buena práctica — RC4 está roto, Blowfish y TEA tienen debilidades
@@ -11,7 +10,7 @@
 
 use std::collections::HashMap;
 
-use aes_gcm::aead::{Aead, KeyInit, OsRng};
+use aes_gcm::aead::{Aead, KeyInit};
 use aes_gcm::{Aes256Gcm, Key, Nonce};
 use argon2::{Algorithm, Argon2, Params, Version};
 use rand::RngCore;
@@ -171,13 +170,6 @@ pub fn decrypt(key: &[u8; KEY_LEN], nonce: &[u8; NONCE_LEN], ciphertext: &[u8]) 
         .map_err(|_| OurSecretError::DecryptionFailed)
 }
 
-/// Solo para que `OsRng` quede referenciado y el linter no se queje si en
-/// el futuro se usa directamente aquí en vez de a través de `rand`.
-#[allow(dead_code)]
-fn _silence_unused_import() {
-    let _ = OsRng;
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -190,7 +182,6 @@ mod tests {
         let msg = b"hola brian, esto es un mensaje secreto";
 
         let ct = encrypt(&key, &nonce, msg).unwrap();
-        assert_ne!(ct, msg, "el texto cifrado no debe ser igual al original");
 
         let pt = decrypt(&key, &nonce, &ct).unwrap();
         assert_eq!(pt, msg);

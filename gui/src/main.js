@@ -1,15 +1,6 @@
-// Este frontend se sirve tal cual (frontendDist: "../src"), sin paso de
-// bundler (Vite/esbuild) que resuelva imports de node_modules. Un import
-// ES de un paquete por nombre ("@tauri-apps/api/core") no es una URL
-// válida para el navegador — solo un bundler sabe convertir eso en una
-// ruta real. Sin bundler, ese import falla al cargar la página, lo cual
-// aborta TODO el módulo (incluidos los listeners de los botones de más
-// abajo) sin avisar claramente en la interfaz — por eso casi ningún botón
-// respondía.
-//
-// Arreglo: usar el objeto global `window.__TAURI__`, que Tauri inyecta
-// automáticamente en la página porque `withGlobalTauri: true` está
-// activado en tauri.conf.json. No hace falta ningún import ni bundler.
+// Sin bundler (frontendDist: "../src"): un `import "@tauri-apps/api"` no
+// resolvería y abortaría todo el módulo. Se usa el global que inyecta
+// `withGlobalTauri: true` en tauri.conf.json.
 const invoke = window.__TAURI__.core.invoke;
 const { open, save } = window.__TAURI__.dialog;
 
@@ -29,7 +20,6 @@ let items = []; // [{kind:'file', path, label} | {kind:'message', subject, text}
 
 const carrierNameEl = document.getElementById("carrier-name");
 const carrierInfoEl = document.getElementById("carrier-info");
-const capacityInfoEl = document.getElementById("capacity-info");
 const itemListEl = document.getElementById("item-list");
 
 document.getElementById("pick-carrier").addEventListener("click", async () => {
@@ -68,8 +58,7 @@ document.getElementById("add-message").addEventListener("click", () => {
   const subject = document.getElementById("msg-subject").value.trim();
   const text = document.getElementById("msg-text").value.trim();
   if (!subject || !text) {
-    alert("Escribe un asunto y un texto para el mensaje.");
-    return;
+    return showResult(hideResultEl, "Escribe un asunto y un texto para el mensaje.", false);
   }
   items.push({ kind: "message", subject, text });
   document.getElementById("msg-subject").value = "";
@@ -122,7 +111,6 @@ document.getElementById("do-hide").addEventListener("click", async () => {
   }
   const mode = document.querySelector('input[name="mode"]:checked').value;
 
-  const defaultExt = mode === "lsb" ? "png" : carrierPath.split(".").pop();
   const outputPath = await save({
     title: "Guardar como…",
     defaultPath: suggestOutputName(carrierPath, mode),

@@ -129,7 +129,6 @@ fn is_image_carrier(carrier_path: String) -> bool {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
-        .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
             hide_items,
@@ -138,5 +137,5 @@ pub fn run() {
             is_image_carrier
         ])
         .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .expect("error al arrancar la aplicación Tauri");
 }

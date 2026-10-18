@@ -3,9 +3,8 @@
 //!
 //! # Formato (difícil de detectar)
 //!
-//! Cuatro decisiones contra la detección (ver
-//! `docs/informes/2026-10-17-auditoria-superficie-sin-clave.md`, que las
-//! motivó a partir de un primer formato ya retirado):
+//! Cuatro decisiones contra la detección (motivadas por una auditoría de
+//! un primer formato ya retirado):
 //!
 //! 1. **Solo RGB, nunca alfa.** Una foto opaca que de repente tiene alfa
 //!    con valores ≠255 es una señal obvia. Se trabaja sobre los 3 canales
@@ -328,10 +327,11 @@ mod tests {
 
     #[test]
     fn capacity_matches_embed_threshold() {
-        let img = test_image(16, 16); // 16*16*3 = 768 bytes raw
-        let cap = capacity_bytes(&img); // payload máximo
-                                        // Un plain_blob que, cifrado, deja el payload justo en el límite:
-                                        // payload = 12 (nonce) + plain + 16 (tag). cap = payload máximo.
+        // 16*16*3 = 768 bytes raw.
+        let img = test_image(16, 16);
+        // cap = payload máximo. Un plain_blob que, cifrado, lo deja justo en
+        // el límite: payload = 12 (nonce) + plain + 16 (tag).
+        let cap = capacity_bytes(&img);
         let plain = vec![0xABu8; cap - NONCE_LEN - GCM_TAG_LEN];
         assert!(embed(&img, &plain, "k").is_ok());
         let too_big = vec![0xABu8; cap]; // payload > cap seguro

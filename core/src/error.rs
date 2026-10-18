@@ -2,10 +2,10 @@ use thiserror::Error;
 
 /// Todos los errores que puede devolver `oursecret-core`.
 ///
-/// Por qué un enum y no `anyhow`/`Box<dyn Error>`: la CLI y la futura GUI
-/// necesitan distinguir casos concretos (ej. "contraseña incorrecta" debe
-/// mostrar un mensaje distinto a "el portador es demasiado pequeño"), así
-/// que un error tipado permite `match` en las capas de arriba.
+/// Por qué un enum y no `anyhow`/`Box<dyn Error>`: `read` necesita
+/// distinguir `DecryptionFailed` de `NotAContainer` para elegir qué error
+/// reportar, y los tests comprueban la variante exacta. La CLI y la GUI
+/// solo muestran el mensaje (`Display`).
 #[derive(Debug, Error)]
 pub enum OurSecretError {
     #[error("no cabe en el portador: el contenido, ya empaquetado y cifrado, ocupa {needed} bytes y solo hay sitio para {available}")]

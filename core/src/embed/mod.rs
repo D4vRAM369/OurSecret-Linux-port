@@ -1,7 +1,6 @@
 //! Estrategias de inserción del contenedor cifrado dentro de un archivo
 //! portador. Corresponden a los dos "modales" que vimos en la interfaz
-//! del OurSecret original (`docs/03_PASO_A_PASO.md`, Paso 3 del análisis):
-//! *"Hide more data"* (el portador crece) y *"Keep the same size"* (no
+//! del OurSecret original: *"Hide more data"* (el portador crece) y *"Keep the same size"* (no
 //! crece). No sabemos el algoritmo exacto que usaba el original por
 //! dentro (bloqueado por su protector), así que estas son implementaciones
 //! propias que logran el mismo *efecto observable*.

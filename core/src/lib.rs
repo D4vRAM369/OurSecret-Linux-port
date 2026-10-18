@@ -7,8 +7,7 @@
 //! archivo involucrados), no de su código fuente ni de ingeniería inversa
 //! a nivel de instrucción del binario protegido. El formato de contenedor,
 //! los algoritmos criptográficos elegidos y el algoritmo de inserción de
-//! bits son diseño propio — ver `docs/02_ARQUITECTURA.md` del proyecto
-//! para el razonamiento completo.
+//! bits son diseño propio.
 //!
 //! ## Flujo de alto nivel
 //!
