@@ -40,6 +40,9 @@ enum Command {
 
         /// Estrategia de ocultación: "append" (cualquier archivo, crece de tamaño)
         /// o "lsb" (solo imágenes PNG/BMP, mantiene las dimensiones).
+        /// Ojo: con "append", en PNG/JPEG/PDF/ZIP se ve que sobran datos tras
+        /// el final del archivo (no qué son, pero sí que hay algo); en audio y
+        /// vídeo se nota menos. Para fotos, "lsb" es más discreto.
         #[arg(long, default_value = "append")]
         mode: String,
 

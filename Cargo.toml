@@ -12,6 +12,12 @@ opt-level = 3
 panic = "abort"
 strip = true
 
+# La info de depuración completa es lo que más pesa en target/debug. Con solo
+# tablas de líneas los backtraces siguen dando archivo:línea; se pierde
+# inspeccionar variables en gdb/lldb (volver a `debug = true` si hace falta).
+[profile.dev]
+debug = "line-tables-only"
+
 # Argon2id a 64 MiB / t=3 sin optimizar tarda ~0,4 s por llamada, y los tests
 # la llaman decenas de veces. Optimizar solo esas dependencias en `dev` deja
 # los tests rápidos sin perder la depuración de nuestro propio código.

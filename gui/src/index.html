@@ -54,6 +54,12 @@
               <label><input type="radio" name="mode" value="append" checked /> Modo <b>crece</b> — cualquier archivo, añade los datos al final</label>
               <label><input type="radio" name="mode" value="lsb" /> Modo <b>mismas dimensiones</b> — solo imágenes PNG/BMP</label>
             </div>
+            <p class="hint">
+              Ojo con el modo <b>crece</b>: en PNG, JPEG, PDF o ZIP cualquiera puede ver que sobran
+              datos después del final del archivo. No sabrá qué son ni podrá leerlos, pero sí que hay
+              algo. En audio y vídeo se nota menos. Para fotos, el modo <b>mismas dimensiones</b> es
+              más discreto.
+            </p>
             <div id="capacity-info" class="info"></div>
           </li>
         </ol>
