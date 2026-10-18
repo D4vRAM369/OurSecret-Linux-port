@@ -75,4 +75,4 @@ La CLI y la GUI son capas finas sobre `oursecret-core`.
 
 ## Licencia
 
-MIT.
+MIT — ver [`LICENSE`](LICENSE).
