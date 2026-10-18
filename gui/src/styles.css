@@ -172,6 +172,23 @@ textarea {
   background: var(--accent-strong);
 }
 
+/* Desactivado tiene que VERSE: el radio nativo apenas cambia en tema oscuro. */
+.btn:disabled {
+  opacity: 0.5;
+  cursor: progress;
+}
+
+label:has(input:disabled) {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* Foco visible para quien navega con teclado. */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
 .file-chip {
   color: var(--text-dim);
   font-size: 0.82rem;
@@ -250,7 +267,13 @@ textarea {
   color: var(--err);
 }
 
+.result .status-ok {
+  color: var(--ok);
+  margin-bottom: 0.6rem;
+}
+
 .extracted-item {
+  color: var(--text);
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: 8px;

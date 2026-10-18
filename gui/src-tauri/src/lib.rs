@@ -5,6 +5,10 @@
 //! de `oursecret-core`, que es donde vive toda la lógica de verdad. Nada
 //! de criptografía, parsing de formato ni esteganografía se implementa
 //! aquí — eso ya está hecho, probado y compartido con la CLI.
+//!
+//! Todos los comandos llevan `#[tauri::command(async)]`: sin `async`, Tauri
+//! los ejecuta en el hilo principal (rama `body_blocking` de tauri-macros),
+//! y Argon2 + recorrer los píxeles congelaría la ventana mientras dura.
 
 use std::path::PathBuf;
 
@@ -15,14 +19,14 @@ use serde::{Deserialize, Serialize};
 /// JSON de Tauri (serde). `oursecret_core::Item` no deriva Serialize
 /// porque el core no debería saber nada de cómo se transporta — esta es
 /// justo la frontera donde se traduce.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 enum ItemInput {
     File { path: String },
     Message { subject: String, text: String },
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 enum ExtractedItem {
     File { name: String, saved_to: String },
@@ -46,7 +50,7 @@ fn to_core_item(input: ItemInput) -> Result<Item, String> {
 
 /// Paso 2+3 del flujo original ("añadir archivo/mensaje" + "contraseña")
 /// hechos en una sola llamada: empaqueta, cifra y esconde en `carrier_path`.
-#[tauri::command]
+#[tauri::command(async)]
 fn hide_items(
     carrier_path: String,
     output_path: String,
@@ -81,7 +85,7 @@ fn hide_items(
 
 /// Paso 1+2 del flujo de lectura ("abrir stegano-media" + "contraseña"):
 /// descifra y, para los archivos, los escribe en `out_dir`.
-#[tauri::command]
+#[tauri::command(async)]
 fn extract_items(
     input_path: String,
     out_dir: String,
@@ -94,11 +98,18 @@ fn extract_items(
     std::fs::create_dir_all(&out_dir_path).map_err(|e| e.to_string())?;
 
     let mut result = Vec::with_capacity(items.len());
+    let mut saved = 0;
     for item in items {
         match item {
             Item::File { name, data } => {
+                // Si falla a mitad, los anteriores YA están en disco: decirlo.
                 let dest = oursecret_core::save_extracted_file(&out_dir_path, &name, &data)
-                    .map_err(|e| e.to_string())?;
+                    .map_err(|e| {
+                        format!(
+                            "{e} (antes del fallo se guardaron {saved} archivo(s) en {out_dir})"
+                        )
+                    })?;
+                saved += 1;
                 result.push(ExtractedItem::File {
                     name,
                     saved_to: dest.to_string_lossy().to_string(),
@@ -114,15 +125,15 @@ fn extract_items(
 
 /// Para el modo LSB: cuántos bytes caben en esta imagen, para avisar al
 /// usuario antes de que intente esconder algo demasiado grande.
-#[tauri::command]
+#[tauri::command(async)]
 fn lsb_capacity(carrier_path: String) -> Result<usize, String> {
     oursecret_core::lsb_capacity(&PathBuf::from(carrier_path)).map_err(|e| e.to_string())
 }
 
 /// Si `carrier_path` es una imagen PNG/BMP válida — decide si ofrecer el
 /// modo LSB en la interfaz o dejar solo el modo `append`.
-#[tauri::command]
-fn is_image_carrier(carrier_path: String) -> bool {
+#[tauri::command(async)]
+fn is_lsb_carrier(carrier_path: String) -> bool {
     oursecret_core::is_lsb_carrier(&PathBuf::from(carrier_path))
 }
 
@@ -134,7 +145,7 @@ pub fn run() {
             hide_items,
             extract_items,
             lsb_capacity,
-            is_image_carrier
+            is_lsb_carrier
         ])
         .run(tauri::generate_context!())
         .expect("error al arrancar la aplicación Tauri");

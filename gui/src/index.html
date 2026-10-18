@@ -9,27 +9,27 @@
   <body>
     <header class="topbar">
       <h1>OurSecret <span class="accent">Linux</span></h1>
-      <nav class="tabs">
-        <button class="tab-btn active" data-tab="hide">Esconder</button>
-        <button class="tab-btn" data-tab="extract">Extraer</button>
+      <nav class="tabs" role="tablist">
+        <button class="tab-btn active" data-tab="hide" role="tab" aria-selected="true" aria-controls="tab-hide">Esconder</button>
+        <button class="tab-btn" data-tab="extract" role="tab" aria-selected="false" aria-controls="tab-extract">Extraer</button>
       </nav>
     </header>
 
     <main>
       <!-- ================= ESCONDER ================= -->
-      <section id="tab-hide" class="tab-panel active">
+      <section id="tab-hide" class="tab-panel active" role="tabpanel">
         <ol class="steps">
-          <li class="step" id="step-1">
+          <li class="step">
             <h2>Paso 1 — Archivo portador</h2>
-            <p class="hint">Cualquier archivo sirve (fotos, audio, vídeo, documentos...). Si es PNG/BMP también puedes usar el modo que mantiene las dimensiones.</p>
+            <p class="hint">Cualquier archivo sirve (fotos, audio, vídeo, documentos...). Si es PNG/BMP también puedes usar el modo <b>mismas dimensiones (LSB)</b>.</p>
             <div class="row">
               <button id="pick-carrier" class="btn">Elegir archivo portador…</button>
               <span id="carrier-name" class="file-chip">ninguno seleccionado</span>
             </div>
-            <div id="carrier-info" class="info"></div>
+            <div id="carrier-info" class="info" aria-live="polite"></div>
           </li>
 
-          <li class="step" id="step-2">
+          <li class="step">
             <h2>Paso 2 — Qué quieres esconder</h2>
             <div class="row">
               <button id="add-file" class="btn btn-secondary">+ Añadir archivo</button>
@@ -38,21 +38,21 @@
 
             <details class="message-box">
               <summary>Añadir un mensaje de texto</summary>
-              <input id="msg-subject" type="text" placeholder="Asunto" />
-              <textarea id="msg-text" rows="4" placeholder="Escribe el mensaje…"></textarea>
+              <input id="msg-subject" type="text" placeholder="Asunto" aria-label="Asunto del mensaje" />
+              <textarea id="msg-text" rows="4" placeholder="Escribe el mensaje…" aria-label="Texto del mensaje"></textarea>
               <button id="add-message" class="btn btn-secondary">Añadir mensaje a la lista</button>
             </details>
           </li>
 
-          <li class="step" id="step-3">
+          <li class="step">
             <h2>Paso 3 — Contraseña y modo</h2>
             <div class="row">
-              <input id="password" type="password" placeholder="Contraseña" />
-              <input id="password2" type="password" placeholder="Repite la contraseña" />
+              <input id="password" type="password" placeholder="Contraseña" aria-label="Contraseña" autocomplete="new-password" />
+              <input id="password2" type="password" placeholder="Repite la contraseña" aria-label="Repite la contraseña" autocomplete="new-password" />
             </div>
             <div class="row mode-row">
-              <label><input type="radio" name="mode" value="append" checked /> Modo <b>crece</b> — cualquier archivo, añade los datos al final</label>
-              <label><input type="radio" name="mode" value="lsb" /> Modo <b>mismas dimensiones</b> — solo imágenes PNG/BMP</label>
+              <label><input type="radio" name="mode" value="append" checked /> Modo <b>crece (append)</b> — cualquier archivo, añade los datos al final</label>
+              <label><input type="radio" name="mode" value="lsb" /> Modo <b>mismas dimensiones (LSB)</b> — solo imágenes PNG/BMP</label>
             </div>
             <p class="hint">
               Ojo con el modo <b>crece</b>: en PNG, JPEG, PDF o ZIP cualquiera puede ver que sobran
@@ -66,11 +66,11 @@
         <div class="action-row">
           <button id="do-hide" class="btn btn-primary">Esconder y guardar como…</button>
         </div>
-        <div id="hide-result" class="result"></div>
+        <div id="hide-result" class="result" aria-live="polite"></div>
       </section>
 
       <!-- ================= EXTRAER ================= -->
-      <section id="tab-extract" class="tab-panel">
+      <section id="tab-extract" class="tab-panel" role="tabpanel">
         <ol class="steps">
           <li class="step">
             <h2>Paso 1 — Abrir archivo con datos ocultos</h2>
@@ -82,12 +82,12 @@
           <li class="step">
             <h2>Paso 2 — Contraseña</h2>
             <div class="row">
-              <input id="extract-password" type="password" placeholder="Contraseña" />
+              <input id="extract-password" type="password" placeholder="Contraseña" aria-label="Contraseña del archivo" autocomplete="off" />
               <button id="do-extract" class="btn btn-primary">Extraer</button>
             </div>
           </li>
         </ol>
-        <div id="extract-result" class="result"></div>
+        <div id="extract-result" class="result" aria-live="polite"></div>
       </section>
     </main>
 
