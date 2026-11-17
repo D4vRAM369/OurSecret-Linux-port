@@ -16,28 +16,33 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-      - name: Dependencias de sistema de Tauri
+      - name: Dependencias de sistema de Tauri y RPM
         run: |
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev \
-            libayatana-appindicator3-dev librsvg2-dev
+            libayatana-appindicator3-dev librsvg2-dev rpm
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
       - run: cargo build --release -p oursecret-cli
-      - name: Empaquetar GUI (.deb y .AppImage)
+      - name: Empaquetar GUI (.deb, .rpm, .AppImage)
         working-directory: gui
         run: |
           npm ci
-          npx tauri build
-      - name: Preparar artefactos Linux
+          npx tauri build --bundles deb,rpm,appimage
+      - name: Preparar artefactos Linux (instaladores y portable)
         run: |
           mkdir -p dist-linux
           cp target/release/oursecret dist-linux/oursecret-linux-x86_64
           cp target/release/bundle/deb/*.deb dist-linux/
+          cp target/release/bundle/rpm/*.rpm dist-linux/
           cp target/release/bundle/appimage/*.AppImage dist-linux/
+          mkdir -p dist-linux/portable-tmp
+          cp target/release/oursecret target/release/oursecret-gui README.md LICENSE dist-linux/portable-tmp/
+          tar -czf dist-linux/oursecret-linux-x86_64-portable.tar.gz -C dist-linux/portable-tmp .
+          rm -rf dist-linux/portable-tmp
       - uses: actions/upload-artifact@v4
         with:
           name: release-linux
@@ -49,20 +54,60 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - run: cargo build --release -p oursecret-cli -p oursecret-gui
-      - name: Preparar artefactos Windows
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - run: cargo build --release -p oursecret-cli
+      - name: Empaquetar GUI (.msi y setup .exe NSIS)
+        working-directory: gui
+        run: |
+          npm ci
+          npx tauri build --bundles msi,nsis
+      - name: Preparar artefactos Windows (instaladores y portable)
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path dist-windows | Out-Null
           Copy-Item target/release/oursecret.exe dist-windows/oursecret-windows-x86_64.exe
           Copy-Item target/release/oursecret-gui.exe dist-windows/oursecret-gui-windows-x86_64.exe
+          Copy-Item target/release/bundle/msi/*.msi dist-windows/
+          Copy-Item target/release/bundle/nsis/*-setup.exe dist-windows/
+          New-Item -ItemType Directory -Force -Path dist-windows/portable-tmp | Out-Null
+          Copy-Item target/release/oursecret.exe, target/release/oursecret-gui.exe, README.md, LICENSE dist-windows/portable-tmp/
+          Compress-Archive -Path dist-windows/portable-tmp/* -DestinationPath dist-windows/oursecret-windows-x86_64-portable.zip
+          Remove-Item -Recurse -Force dist-windows/portable-tmp
       - uses: actions/upload-artifact@v4
         with:
           name: release-windows
           path: dist-windows/*
 
+  build-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - run: cargo build --release -p oursecret-cli
+      - name: Empaquetar GUI (.dmg y .app)
+        working-directory: gui
+        run: |
+          npm ci
+          npx tauri build --bundles dmg,app
+      - name: Preparar artefactos macOS (.dmg y portable)
+        run: |
+          mkdir -p dist-macos
+          cp target/release/oursecret dist-macos/oursecret-macos-arm64
+          cp target/release/bundle/dmg/*.dmg dist-macos/
+          tar -czf dist-macos/oursecret-macos-arm64-portable.tar.gz -C target/release/bundle/macos .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-macos
+          path: dist-macos/*
+
   publish:
-    needs: [build-linux, build-windows]
+    needs: [build-linux, build-windows, build-macos]
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/download-artifact@v4
