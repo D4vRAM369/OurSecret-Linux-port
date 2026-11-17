@@ -3,6 +3,7 @@ name = "oursecret-gui"
 version = "0.1.0"
 description = "GUI (Tauri) del port Linux/Windows de OurSecret — reimplementación clean-room"
 authors = ["D4vRAM369"]
+license = "MIT"
 edition = "2024"
 
 [lib]

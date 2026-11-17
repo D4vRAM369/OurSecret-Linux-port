@@ -15,6 +15,7 @@ use aes_gcm::{Aes256Gcm, Key, Nonce};
 use argon2::{Algorithm, Argon2, Params, Version};
 use rand::RngCore;
 use rand::SeedableRng;
+use zeroize::Zeroize;
 
 use crate::error::{OurSecretError, Result};
 
@@ -98,6 +99,7 @@ pub fn permutation(key: &[u8; KEY_LEN], count: usize, k: usize) -> Vec<usize> {
     rng0.fill_bytes(&mut seed); // descarta el primer bloque (reservado a la máscara)
     rng0.fill_bytes(&mut seed);
     let mut rng = rand_chacha::ChaCha20Rng::from_seed(seed);
+    seed.zeroize();
     let mut pick_j = |i: usize| i + uniform_below(&mut rng, (count - i) as u64) as usize;
 
     // Dos caminos, MISMO resultado (lo comprueba `dense_and_sparse_agree`):

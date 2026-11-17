@@ -53,7 +53,7 @@ cargo test -p oursecret-core                # tests del núcleo
 cd gui && npm install && npx tauri build    # → .deb y AppImage en target/release/bundle/
 ```
 
-Windows: la CI (`.github/workflows/ci.yml`) compila `oursecret.exe` y `oursecret-gui.exe` en cada push y los deja como artefacto.
+Windows: la CI (`.github/workflows/ci.yml`) compila `oursecret.exe` y `oursecret-gui.exe` en cada push y los deja como artefacto. La GUI requiere WebView2 (incluido por defecto en Windows 10/11).
 
 ## Estructura
 
@@ -72,6 +72,11 @@ La CLI y la GUI son capas finas sobre `oursecret-core`.
 - ⚠️ **Existencia:** en modo `append` con PNG/JPEG/PDF/ZIP se nota que *hay algo*. En modo `lsb`, con cargas altas, el estegoanálisis moderno puede notarlo.
 - ✅ **Archivos de terceros:** quien te manda un archivo conoce la contraseña y elige su contenido. Al extraer, la app no sobrescribe archivos existentes, no deja salir de la carpeta elegida (zip-slip), no interpreta los textos como HTML y limita el tamaño descomprimido (zip bombs).
 - ⚠️ **Contraseña:** Argon2id frena la fuerza bruta, pero una contraseña corta o común se puede adivinar igual.
+
+## Contribuir y seguridad
+
+- Guía para colaborar (y regla *clean-room*): [`CONTRIBUTING.md`](CONTRIBUTING.md).
+- Modelo de amenazas y reporte de vulnerabilidades: [`SECURITY.md`](SECURITY.md).
 
 ## Licencia
 

@@ -54,9 +54,7 @@ pub fn hide(
 
     match mode {
         EmbedMode::Append => {
-            let carrier_bytes = std::fs::read(carrier_path)?;
-            let stego = embed::append::embed(&carrier_bytes, &plain_blob, password)?;
-            std::fs::write(output_path, stego)?;
+            embed::append::embed_file(carrier_path, &plain_blob, password, output_path)?;
         }
         EmbedMode::Lsb => {
             // Un error de E/S (no existe, sin permisos) se queda como Io; todo
@@ -74,6 +72,36 @@ pub fn hide(
     Ok(())
 }
 
+fn user_capacity_from_payload(payload: usize) -> usize {
+    const FIXED: usize = 28 + 101 + 2 * 32 + 7; // 7 de margen → 200
+    let avail = payload.saturating_sub(FIXED);
+    // ponytail: 1 byte por cada 4 KiB cubre los ~5 por 32 KiB de DEFLATE con margen.
+    avail.saturating_sub(avail / 4096)
+}
+
+/// Comprueba si `carrier_path` es una imagen PNG/BMP válida y, de serlo,
+/// devuelve su capacidad en modo LSB (sin decodificar los píxeles).
+///
+/// Devuelve `Ok(None)` si el archivo existe y se puede leer pero no es PNG/BMP;
+/// devuelve `Err(Io)` si hay un fallo de lectura o permisos.
+pub fn probe_lsb_capacity(carrier_path: &Path) -> Result<Option<usize>> {
+    let reader = image::io::Reader::open(carrier_path)?.with_guessed_format()?;
+    if !matches!(
+        reader.format(),
+        Some(image::ImageFormat::Png | image::ImageFormat::Bmp)
+    ) {
+        return Ok(None);
+    }
+    match reader.into_dimensions() {
+        Ok((w, h)) => {
+            let payload = embed::lsb::capacity_bytes_for_dimensions(w, h);
+            Ok(Some(user_capacity_from_payload(payload)))
+        }
+        Err(image::ImageError::IoError(io)) => Err(OurSecretError::Io(io)),
+        Err(_) => Ok(None),
+    }
+}
+
 /// Bytes de **contenido del usuario** que caben en modo LSB en esta imagen,
 /// suponiendo un solo archivo con nombre de hasta 32 caracteres y datos que
 /// no comprimen (el peor caso: fotos, zips, vídeos). Redondea a la baja: si
@@ -87,16 +115,17 @@ pub fn hide(
 /// - zip: ~101 bytes fijos + 2 × longitud del nombre (cabecera local y
 ///   directorio central) + ~5 bytes por cada bloque DEFLATE (~32 KiB).
 pub fn lsb_capacity(carrier_path: &Path) -> Result<usize> {
-    const FIXED: usize = 28 + 101 + 2 * 32 + 7; // 7 de margen → 200
-    let payload = embed::lsb::capacity_bytes(&image::open(carrier_path)?);
-    let avail = payload.saturating_sub(FIXED);
-    // ponytail: 1 byte por cada 4 KiB cubre los ~5 por 32 KiB de DEFLATE con margen.
-    Ok(avail - avail / 4096)
+    match probe_lsb_capacity(carrier_path)? {
+        Some(cap) => Ok(cap),
+        None => Err(OurSecretError::UnsupportedCarrierForLsb(
+            "no es una imagen PNG o BMP válida".into(),
+        )),
+    }
 }
 
 /// Si `carrier_path` es una imagen PNG/BMP que el modo LSB puede usar.
 pub fn is_lsb_carrier(carrier_path: &Path) -> bool {
-    image::open(carrier_path).is_ok()
+    matches!(probe_lsb_capacity(carrier_path), Ok(Some(_)))
 }
 
 /// Extrae y descifra los items escondidos en `stego_path` con `password`.
@@ -104,20 +133,34 @@ pub fn is_lsb_carrier(carrier_path: &Path) -> bool {
 /// primero, es instantáneo) o `Lsb` (si el primero falla y el archivo es
 /// una imagen soportada).
 pub fn read(stego_path: &Path, password: &str) -> Result<Vec<Item>> {
-    let raw = std::fs::read(stego_path)?;
+    if password.is_empty() {
+        return Err(OurSecretError::InvalidInput(
+            "la contraseña no puede estar vacía",
+        ));
+    }
 
-    // Probamos primero el modo append. Ojo: sin cabecera mágica no se
-    // puede distinguir "no es nuestro" de "clave incorrecta" solo por la
-    // estructura, así que intentamos SIEMPRE también el LSB antes de
-    // rendirnos, y al final devolvemos el error más informativo.
-    let append_res = embed::append::extract(&raw, password);
+    // Probamos primero el modo append (O(1) desde el final, sin leer todo el
+    // archivo). Ojo: sin cabecera mágica no se puede distinguir "no es
+    // nuestro" de "clave incorrecta" solo por la estructura, así que
+    // intentamos SIEMPRE también el LSB antes de rendirnos.
+    let append_res = embed::append::extract_from_file(stego_path, password);
     if let Ok(plain_blob) = &append_res {
         return bundle::unpack(plain_blob);
     }
 
-    let lsb_res = match image::load_from_memory(&raw) {
-        Ok(img) => embed::lsb::extract(&img, password),
-        Err(_) => Err(OurSecretError::NotAContainer),
+    let lsb_res = match image::io::Reader::open(stego_path).and_then(|r| r.with_guessed_format()) {
+        Ok(reader)
+            if matches!(
+                reader.format(),
+                Some(image::ImageFormat::Png | image::ImageFormat::Bmp)
+            ) =>
+        {
+            match reader.decode() {
+                Ok(img) => embed::lsb::extract(&img, password),
+                Err(_) => Err(OurSecretError::NotAContainer),
+            }
+        }
+        _ => Err(OurSecretError::NotAContainer),
     };
     if let Ok(plain_blob) = &lsb_res {
         return bundle::unpack(plain_blob);
@@ -256,6 +299,15 @@ mod tests {
         let err = hide(&carrier, &items, "", EmbedMode::Append, &out).unwrap_err();
         assert!(matches!(err, OurSecretError::InvalidInput(_)));
         assert!(!out.exists(), "no debe escribir nada");
+    }
+
+    #[test]
+    fn read_rejects_empty_password() {
+        let dir = tempfile::tempdir().unwrap();
+        let stego = dir.path().join("c.bin");
+        std::fs::write(&stego, b"cualquier cosa").unwrap();
+        let err = read(&stego, "").unwrap_err();
+        assert!(matches!(err, OurSecretError::InvalidInput(_)));
     }
 
     #[test]

@@ -35,6 +35,7 @@
 //! carga. Lo más eficaz sigue siendo esconder poco en imágenes grandes.
 
 use image::{DynamicImage, ImageBuffer, Rgb};
+use zeroize::Zeroizing;
 
 use crate::crypto::{self, GCM_TAG_LEN, KEY_LEN, NONCE_LEN, SALT_LEN};
 use crate::error::{OurSecretError, Result};
@@ -53,6 +54,15 @@ pub fn capacity_bytes(img: &DynamicImage) -> usize {
     raw_len.saturating_sub(OVERHEAD_BITS) / 8
 }
 
+/// Igual que [`capacity_bytes`], pero a partir de las dimensiones sin
+/// decodificar todos los píxeles de la imagen en memoria.
+pub fn capacity_bytes_for_dimensions(width: u32, height: u32) -> usize {
+    let raw_len = (width as usize)
+        .saturating_mul(height as usize)
+        .saturating_mul(3);
+    raw_len.saturating_sub(OVERHEAD_BITS) / 8
+}
+
 /// Incrusta `plain_blob` en los LSB de `img`. Devuelve la
 /// imagen resultante, mismas dimensiones, en RGB.
 pub fn embed(img: &DynamicImage, plain_blob: &[u8], password: &str) -> Result<DynamicImage> {
@@ -62,7 +72,7 @@ pub fn embed(img: &DynamicImage, plain_blob: &[u8], password: &str) -> Result<Dy
 
     let salt = crypto::random_salt();
     let nonce = crypto::random_nonce();
-    let key = crypto::derive_key(password, &salt)?;
+    let key = Zeroizing::new(crypto::derive_key(password, &salt)?);
     let ciphertext = crypto::encrypt(&key, &nonce, plain_blob)?;
 
     // payload = nonce || ciphertext (lo que se dispersa por la imagen).
@@ -70,6 +80,11 @@ pub fn embed(img: &DynamicImage, plain_blob: &[u8], password: &str) -> Result<Dy
     payload.extend_from_slice(&nonce);
     payload.extend_from_slice(&ciphertext);
 
+    let payload_len_u32 =
+        u32::try_from(payload.len()).map_err(|_| OurSecretError::InsufficientCapacity {
+            needed: payload.len() + OVERHEAD_BITS.div_ceil(8),
+            available: raw.len() / 8,
+        })?;
     let needed_bits = OVERHEAD_BITS + payload.len() * 8;
     if needed_bits > raw.len() {
         return Err(OurSecretError::InsufficientCapacity {
@@ -84,7 +99,7 @@ pub fn embed(img: &DynamicImage, plain_blob: &[u8], password: &str) -> Result<Dy
     }
 
     // 2) longitud del payload (u32) XOR máscara de clave, posiciones 128..160.
-    let len_enc = (payload.len() as u32) ^ mask_u32(&key);
+    let len_enc = payload_len_u32 ^ mask_u32(&key);
     for (i, bit) in bits_of_u32(len_enc).into_iter().enumerate() {
         set_lsb(&mut raw[SALT_BITS + i], bit);
     }
@@ -121,7 +136,7 @@ pub fn extract(img: &DynamicImage, password: &str) -> Result<Vec<u8>> {
         }
         *b = v;
     }
-    let key = crypto::derive_key(password, &salt)?;
+    let key = Zeroizing::new(crypto::derive_key(password, &salt)?);
 
     // 2) longitud cifrada.
     let mut len_bits = [0u8; LEN_BITS];

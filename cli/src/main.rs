@@ -5,6 +5,7 @@
 //! usar ninguno de sus algoritmos propietarios — el diseño está en
 //! `oursecret-core`.
 
+use std::collections::HashSet;
 use std::path::PathBuf;
 
 use anyhow::{bail, Context, Result};
@@ -112,18 +113,25 @@ fn cmd_hide(
     }
 
     let mut items = Vec::new();
+    let mut seen_names = HashSet::new();
     for f in &files {
         let data = std::fs::read(f).with_context(|| format!("leyendo {}", f.display()))?;
         let name = f
             .file_name()
             .map(|n| n.to_string_lossy().to_string())
             .unwrap_or_else(|| "archivo".to_string());
+        if !seen_names.insert(name.clone()) {
+            bail!("hay dos archivos con el mismo nombre '{name}'; renombra uno antes de esconderlos juntos");
+        }
         items.push(Item::File { name, data });
     }
     for m in &messages {
         let (subject, text) = m
             .split_once(':')
             .with_context(|| format!("mensaje '{m}' no tiene el formato 'asunto:texto'"))?;
+        if subject.trim().is_empty() {
+            bail!("el asunto del mensaje '{m}' no puede estar vacío");
+        }
         items.push(Item::Message {
             subject: subject.to_string(),
             text: text.to_string(),
@@ -171,26 +179,32 @@ fn cmd_extract(input: PathBuf, out_dir: PathBuf, password: Option<String>) -> Re
     Ok(())
 }
 
-/// Escapa los caracteres de control de un texto extraído antes de imprimirlo.
+/// Escapa caracteres de control (C0, DEL, C1) y marcas bidireccionales
+/// Unicode de un texto extraído antes de imprimirlo.
 ///
 /// Lo extraído lo eligió quien creó el archivo, y la terminal no solo pinta
-/// texto: ejecuta las secuencias que empiezan por ESC (cambiar el título,
-/// borrar la pantalla, escribir en el portapapeles con OSC 52...). Es el mismo
-/// problema que `innerHTML` en la GUI, con otro intérprete al otro lado.
+/// texto: ejecuta secuencias ESC (título, borrar pantalla, OSC 52...) y los
+/// overrides bidi (como U+202E RLO) pueden disfrazar nombres de archivo.
 /// `keep_newlines` deja pasar `\n` y `\t` en el cuerpo de los mensajes.
-///
-/// ponytail: solo categoría Cc (C0, DEL, C1). Los caracteres bidi (U+202E...)
-/// pueden disfrazar un nombre pero no ejecutan nada; escaparlos si hace falta.
 fn for_terminal(s: &str, keep_newlines: bool) -> String {
     let mut out = String::with_capacity(s.len());
     for c in s.chars() {
         if c.is_control() && !(keep_newlines && (c == '\n' || c == '\t')) {
             out.extend(c.escape_default());
+        } else if is_bidi_control(c) {
+            out.extend(c.escape_unicode());
         } else {
             out.push(c);
         }
     }
     out
+}
+
+fn is_bidi_control(c: char) -> bool {
+    matches!(
+        c,
+        '\u{061C}' | '\u{200E}' | '\u{200F}' | '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}'
+    )
 }
 
 fn cmd_capacity(carrier: PathBuf) -> Result<()> {
@@ -228,5 +242,8 @@ mod tests {
         // En el cuerpo se conservan los saltos de línea; en asunto/nombre, no.
         assert_eq!(for_terminal("a\nb\tc", true), "a\nb\tc");
         assert_eq!(for_terminal("a\nb", false), "a\\nb");
+        // Overrides bidireccionales (U+202E RLO) deben quedar escapados.
+        let bidi = for_terminal("factura\u{202e}gpj.exe", false);
+        assert!(!bidi.contains('\u{202e}'), "{bidi:?}");
     }
 }

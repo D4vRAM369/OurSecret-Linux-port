@@ -16,6 +16,17 @@ document.querySelectorAll(".tab-btn").forEach((btn) => {
   });
 });
 
+// ---------- Mostrar / ocultar contraseña ----------
+document.querySelectorAll("[data-eye]").forEach((eyeBtn) => {
+  eyeBtn.addEventListener("click", () => {
+    const input = document.getElementById(eyeBtn.dataset.eye);
+    if (!input) return;
+    const show = input.type === "password";
+    input.type = show ? "text" : "password";
+    eyeBtn.setAttribute("aria-pressed", String(show));
+  });
+});
+
 // ---------- Estado del flujo "Esconder" ----------
 let carrierPath = null;
 let carrierCapacity = null; // bytes en modo LSB; null si el portador no es imagen
@@ -23,52 +34,78 @@ let items = []; // [{kind:'file', path, label, size} | {kind:'message', subject,
 
 const carrierNameEl = document.getElementById("carrier-name");
 const carrierInfoEl = document.getElementById("carrier-info");
+const carrierThumbEl = document.getElementById("carrier-thumb");
 const itemListEl = document.getElementById("item-list");
 const hideResultEl = document.getElementById("hide-result");
+const hideSummaryEl = document.getElementById("hide-summary");
 const hideBtn = document.getElementById("do-hide");
 const lsbRadio = document.querySelector('input[name="mode"][value="lsb"]');
 const appendRadio = document.querySelector('input[name="mode"][value="append"]');
+const pw1El = document.getElementById("password");
+const pw2El = document.getElementById("password2");
+const pwMatchEl = document.getElementById("pw-match");
 
-document.getElementById("pick-carrier").addEventListener("click", async () => {
-  const picked = await open({ multiple: false, title: "Elige el archivo portador" });
-  if (!picked) return;
+async function selectCarrier(picked) {
   carrierPath = picked;
-  carrierNameEl.textContent = basename(picked);
+  const name = basename(picked);
+  carrierNameEl.textContent = name;
+  carrierThumbEl.textContent = extBadge(name);
+  carrierThumbEl.classList.remove("is-image");
   // Se vacía ANTES de preguntar: si algo falla a mitad, no puede quedar a la
   // vista la información del portador anterior junto al nombre del nuevo.
   carrierInfoEl.textContent = "Analizando…";
   carrierCapacity = null;
 
   try {
-    const isImage = await invoke("is_lsb_carrier", { carrierPath });
+    const [cap, size] = await Promise.all([
+      invoke("probe_lsb_carrier", { carrierPath }),
+      invoke("file_size", { path: carrierPath }).catch(() => null),
+    ]);
+    const isImage = cap !== null;
     // LSB solo funciona con PNG/BMP: si no lo es, se desactiva de verdad
     // (no basta con decirlo en el texto) y se vuelve a "crece".
     lsbRadio.disabled = !isImage;
     if (!isImage && lsbRadio.checked) appendRadio.checked = true;
+    const sizeLabel = size != null ? `${formatBytes(size)} · ` : "";
     if (isImage) {
-      carrierCapacity = await invoke("lsb_capacity", { carrierPath });
-      carrierInfoEl.textContent = `Imagen PNG/BMP: admite los dos modos. En mismas dimensiones (LSB) caben ~${formatBytes(carrierCapacity)}.`;
+      carrierCapacity = cap;
+      carrierThumbEl.classList.add("is-image");
+      carrierInfoEl.textContent = `${sizeLabel}PNG/BMP: admite ambos modos. En LSB caben ~${formatBytes(carrierCapacity)}.`;
     } else {
-      carrierInfoEl.textContent = "No es una imagen PNG/BMP: solo está disponible el modo crece (append).";
+      carrierInfoEl.textContent = `${sizeLabel}No es PNG/BMP: solo disponible el modo crece (append).`;
     }
   } catch (err) {
     carrierInfoEl.textContent = `No se pudo analizar el portador: ${err}`;
   }
   updateUsage();
-});
+  updateSummary();
+}
 
-document.querySelectorAll('input[name="mode"]').forEach((r) => r.addEventListener("change", updateUsage));
-
-document.getElementById("add-file").addEventListener("click", async () => {
-  const picked = await open({ multiple: true, title: "Elige archivo(s) a esconder" });
-  if (!picked) return;
-  const paths = Array.isArray(picked) ? picked : [picked];
+async function addFiles(paths) {
   for (const p of paths) {
     // Sin tamaño (null) el archivo se esconde igual; solo falta en la barra.
     const size = await invoke("file_size", { path: p }).catch(() => null);
     items.push({ kind: "file", path: p, label: basename(p), size });
   }
   renderItems();
+}
+
+document.getElementById("pick-carrier").addEventListener("click", async () => {
+  const picked = await open({ multiple: false, title: "Elige el archivo portador" });
+  if (picked) await selectCarrier(picked);
+});
+
+document.querySelectorAll('input[name="mode"]').forEach((r) =>
+  r.addEventListener("change", () => {
+    updateUsage();
+    updateSummary();
+  })
+);
+
+document.getElementById("add-file").addEventListener("click", async () => {
+  const picked = await open({ multiple: true, title: "Elige archivo(s) a esconder" });
+  if (!picked) return;
+  await addFiles(Array.isArray(picked) ? picked : [picked]);
 });
 
 document.getElementById("add-message").addEventListener("click", () => {
@@ -115,6 +152,7 @@ function renderItems() {
     itemListEl.appendChild(li);
   });
   updateUsage();
+  updateSummary();
 }
 
 // Barra "usado / capacidad", solo en modo LSB, que es el que tiene tope.
@@ -125,18 +163,24 @@ const usageFillEl = document.getElementById("usage-fill");
 const usageTextEl = document.getElementById("usage-text");
 const enc = new TextEncoder();
 
-function updateUsage() {
-  const show = carrierCapacity != null && lsbRadio.checked && items.length > 0;
-  usageEl.hidden = !show;
-  if (!show) return;
-  const unknown = items.some((it) => it.kind === "file" && it.size == null);
-  const used =
+function estimatedPayloadBytes() {
+  if (items.length === 0) return 0;
+  return (
     items.reduce(
       (sum, it) =>
         sum + (it.kind === "file" ? it.size ?? 0 : enc.encode(`${it.subject}\n${it.text}`).length),
       0
     ) +
-    170 * (items.length - 1);
+    170 * (items.length - 1)
+  );
+}
+
+function updateUsage() {
+  const show = carrierCapacity != null && lsbRadio.checked && items.length > 0;
+  usageEl.hidden = !show;
+  if (!show) return;
+  const unknown = items.some((it) => it.kind === "file" && it.size == null);
+  const used = estimatedPayloadBytes();
   const over = used > carrierCapacity;
   usageEl.classList.toggle("over", over);
   usageFillEl.style.width = `${Math.min(100, (used / carrierCapacity) * 100)}%`;
@@ -144,6 +188,43 @@ function updateUsage() {
     ? `No cabe: ~${formatBytes(used)} de ~${formatBytes(carrierCapacity)}. Quita algo o usa el modo crece.`
     : `~${formatBytes(used)} de ~${formatBytes(carrierCapacity)}${unknown ? " (sin contar algún archivo ilegible)" : ""}`;
 }
+
+function updateSummary() {
+  if (!carrierPath && items.length === 0) {
+    hideSummaryEl.textContent = "Elige un portador y añade al menos un archivo o mensaje.";
+    return;
+  }
+  const mode = document.querySelector('input[name="mode"]:checked').value;
+  const count = items.length;
+  const est = count > 0 ? `~${formatBytes(estimatedPayloadBytes())}` : "0 bytes";
+  const outHint = carrierPath ? ` · Salida: ${suggestOutputName(carrierPath, mode)}` : "";
+  hideSummaryEl.textContent = `${count} elemento(s) (${est}) · Modo ${mode.toUpperCase()}${outHint}`;
+}
+
+function updatePasswordMatch() {
+  const a = pw1El.value;
+  const b = pw2El.value;
+  if (!a && !b) {
+    pwMatchEl.className = "pw-match";
+    pwMatchEl.textContent = "";
+    return;
+  }
+  if (!b) {
+    pwMatchEl.className = "pw-match";
+    pwMatchEl.textContent = "Repite la contraseña para confirmar.";
+    return;
+  }
+  if (a === b) {
+    pwMatchEl.className = "pw-match ok";
+    pwMatchEl.textContent = "✓ Las contraseñas coinciden";
+  } else {
+    pwMatchEl.className = "pw-match err";
+    pwMatchEl.textContent = "Las contraseñas no coinciden";
+  }
+}
+
+pw1El.addEventListener("input", updatePasswordMatch);
+pw2El.addEventListener("input", updatePasswordMatch);
 
 // ---------- Esconder ----------
 hideBtn.addEventListener("click", async () => {
@@ -156,12 +237,10 @@ hideBtn.addEventListener("click", async () => {
   if (items.length === 0) {
     return showResult(hideResultEl, "Añade al menos un archivo o un mensaje.", false);
   }
-  const pw1 = document.getElementById("password");
-  const pw2 = document.getElementById("password2");
-  if (!pw1.value) {
+  if (!pw1El.value) {
     return showResult(hideResultEl, "Escribe una contraseña.", false);
   }
-  if (pw1.value !== pw2.value) {
+  if (pw1El.value !== pw2El.value) {
     return showResult(hideResultEl, "Las contraseñas no coinciden.", false);
   }
   const mode = document.querySelector('input[name="mode"]:checked').value;
@@ -184,10 +263,11 @@ hideBtn.addEventListener("click", async () => {
         carrierPath,
         outputPath,
         items: payload,
-        password: pw1.value,
+        password: pw1El.value,
         mode,
       });
-      pw1.value = pw2.value = ""; // que no quede a la vista de quien venga después
+      pw1El.value = pw2El.value = ""; // que no quede a la vista de quien venga después
+      updatePasswordMatch();
       showResult(hideResultEl, `Listo. Guardado en:\n${outputPath}`, true);
     } catch (err) {
       showResult(hideResultEl, `Error: ${err}`, false);
@@ -201,11 +281,14 @@ const stegoNameEl = document.getElementById("stego-name");
 const extractResultEl = document.getElementById("extract-result");
 const extractBtn = document.getElementById("do-extract");
 
-document.getElementById("pick-stego").addEventListener("click", async () => {
-  const picked = await open({ multiple: false, title: "Elige el archivo con datos ocultos" });
-  if (!picked) return;
+function selectStego(picked) {
   stegoPath = picked;
   stegoNameEl.textContent = basename(picked);
+}
+
+document.getElementById("pick-stego").addEventListener("click", async () => {
+  const picked = await open({ multiple: false, title: "Elige el archivo con datos ocultos" });
+  if (picked) selectStego(picked);
 });
 
 extractBtn.addEventListener("click", async () => {
@@ -235,17 +318,21 @@ extractBtn.addEventListener("click", async () => {
       results.forEach((item) => {
         const div = document.createElement("div");
         div.className = "extracted-item";
+        const body = document.createElement("div");
+        body.className = "extracted-body";
         // Todo lo extraído lo eligió quien creó el archivo (y conoce la
         // contraseña): es texto no confiable. Con innerHTML, un asunto como
         // "<img src=x onerror=...>" ejecutaría JS con acceso a window.__TAURI__.
         if (item.kind === "file") {
-          div.append(textDiv("k", "archivo"), textDiv("", item.name), textDiv("hint", item.saved_to));
+          body.append(textDiv("k", "archivo"), textDiv("", item.name), textDiv("hint", item.saved_to));
+          div.append(body, makeCopyButton("Copiar ruta", item.saved_to));
         } else {
           const subject = document.createElement("b");
           subject.textContent = item.subject;
           const subjectDiv = textDiv("", "");
           subjectDiv.appendChild(subject);
-          div.append(textDiv("k", "mensaje"), subjectDiv, textDiv("", item.text));
+          body.append(textDiv("k", "mensaje"), subjectDiv, textDiv("", item.text));
+          div.append(body, makeCopyButton("Copiar texto", item.text));
         }
         extractResultEl.appendChild(div);
       });
@@ -256,26 +343,110 @@ extractBtn.addEventListener("click", async () => {
 });
 
 // Enter en un campo de contraseña = pulsar su botón.
-document.getElementById("password2").addEventListener("keydown", (e) => {
+pw2El.addEventListener("keydown", (e) => {
   if (e.key === "Enter") hideBtn.click();
 });
 document.getElementById("extract-password").addEventListener("keydown", (e) => {
   if (e.key === "Enter") extractBtn.click();
 });
 
+// ---------- Drag & Drop nativo (Tauri 2) ----------
+const carrierDropEl = document.getElementById("carrier-dropzone");
+const itemsDropEl = document.getElementById("items-dropzone");
+const stegoDropEl = document.getElementById("stego-dropzone");
+
+function clearDropHighlights() {
+  carrierDropEl.classList.remove("dragover");
+  itemsDropEl.classList.remove("dragover");
+  stegoDropEl.classList.remove("dragover");
+}
+
+function hitDropzone(position) {
+  if (!position) return null;
+  const x = position.x / (window.devicePixelRatio || 1);
+  const y = position.y / (window.devicePixelRatio || 1);
+  const extractActive = document.getElementById("tab-extract").classList.contains("active");
+  if (extractActive) {
+    return stegoDropEl;
+  }
+  const r = carrierDropEl.getBoundingClientRect();
+  if (x >= r.left && x <= r.right && y >= r.top && y <= r.bottom) {
+    return carrierDropEl;
+  }
+  return itemsDropEl;
+}
+
+if (window.__TAURI__?.webview?.getCurrentWebview) {
+  window.__TAURI__.webview.getCurrentWebview().onDragDropEvent(async (event) => {
+    const p = event.payload;
+    if (p.type === "enter" || p.type === "over") {
+      clearDropHighlights();
+      const target = hitDropzone(p.position);
+      if (target) target.classList.add("dragover");
+    } else if (p.type === "leave") {
+      clearDropHighlights();
+    } else if (p.type === "drop") {
+      clearDropHighlights();
+      const paths = p.paths || [];
+      if (paths.length === 0) return;
+      const target = hitDropzone(p.position);
+      if (target === stegoDropEl) {
+        selectStego(paths[0]);
+      } else if (target === carrierDropEl) {
+        await selectCarrier(paths[0]);
+      } else {
+        await addFiles(paths);
+      }
+    }
+  });
+}
+
 // ---------- Utilidades ----------
 
-// Mientras el backend trabaja (Argon2 tarda): botón desactivado, para que
-// un segundo clic no lance la operación otra vez, y un aviso de que algo
-// está pasando, para que nadie piense que el primero no funcionó.
+function makeCopyButton(label, value) {
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "btn-copy";
+  btn.textContent = label;
+  btn.addEventListener("click", async () => {
+    try {
+      await navigator.clipboard.writeText(value);
+      btn.textContent = "¡Copiado!";
+      setTimeout(() => {
+        btn.textContent = label;
+      }, 1500);
+    } catch {
+      btn.textContent = "No disponible";
+    }
+  });
+  return btn;
+}
+
+function extBadge(name) {
+  const dot = name.lastIndexOf(".");
+  if (dot <= 0 || dot === name.length - 1) return "ARCH";
+  return name.slice(dot + 1, dot + 5).toUpperCase();
+}
+
+// Mientras el backend trabaja (Argon2 tarda): bloqueamos controles interactivos
+// (guardando su estado previo para no reactivar p. ej. LSB si no era imagen)
+// y mostramos aviso para que nadie lance una segunda operación ni edite la lista.
 async function whileBusy(btn, resultEl, work) {
+  const controls = document.querySelectorAll(".tabs button, main button, main input, main textarea");
+  const prevDisabled = new Map();
+  controls.forEach((el) => {
+    prevDisabled.set(el, el.disabled);
+    el.disabled = true;
+  });
   btn.disabled = true;
   resultEl.className = "result";
   resultEl.textContent = "Trabajando… (derivar la clave de la contraseña tarda unos segundos)";
   try {
     await work();
   } finally {
-    btn.disabled = false;
+    controls.forEach((el) => {
+      el.disabled = prevDisabled.get(el) ?? false;
+    });
   }
 }
 
@@ -311,3 +482,4 @@ function showResult(el, message, ok) {
 }
 
 renderItems();
+updateSummary();

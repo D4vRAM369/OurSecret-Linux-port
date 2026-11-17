@@ -16,86 +16,115 @@
     </header>
 
     <main>
-      <!-- ================= ESCONDER ================= -->
+      <!-- ================= ESCONDER (2 columnas) ================= -->
       <section id="tab-hide" class="tab-panel active" role="tabpanel">
-        <ol class="steps">
-          <li class="step">
-            <h2>Paso 1 — Archivo portador</h2>
-            <p class="hint">Cualquier archivo sirve (fotos, audio, vídeo, documentos...). Si es PNG/BMP también puedes usar el modo <b>mismas dimensiones (LSB)</b>.</p>
-            <div class="row">
-              <button id="pick-carrier" class="btn">Elegir archivo portador…</button>
-              <span id="carrier-name" class="file-chip">ninguno seleccionado</span>
-            </div>
-            <div id="carrier-info" class="info" aria-live="polite"></div>
-          </li>
+        <div class="two-col">
+          <!-- Columna izquierda: Portador, Modo, Contraseña -->
+          <div class="col">
+            <section class="step">
+              <h2>1. Archivo portador</h2>
+              <div id="carrier-dropzone" class="dropzone">
+                <div id="carrier-thumb" class="thumb">ARCH</div>
+                <div class="dz-meta">
+                  <div id="carrier-name" class="dz-title">Ninguno seleccionado</div>
+                  <div id="carrier-info" class="info" aria-live="polite">Cualquier archivo sirve (PNG/BMP permite además modo LSB). Arrastra aquí o elige uno.</div>
+                </div>
+                <button id="pick-carrier" class="btn">Elegir…</button>
+              </div>
+            </section>
 
-          <li class="step">
-            <h2>Paso 2 — Qué quieres esconder</h2>
-            <div class="row">
-              <button id="add-file" class="btn btn-secondary">+ Añadir archivo</button>
-            </div>
-            <ul id="item-list" class="item-list"></ul>
-            <div id="usage" class="usage" hidden>
-              <div class="usage-bar"><div id="usage-fill" class="usage-fill"></div></div>
-              <span id="usage-text" class="usage-text" aria-live="polite"></span>
-            </div>
+            <section class="step">
+              <h2>2. Modo de ocultación</h2>
+              <fieldset class="modes modes-stack">
+                <legend class="sr-only">Modo de ocultación</legend>
+                <label class="mode-card">
+                  <input type="radio" name="mode" value="append" checked />
+                  <span class="mode-title">Crece <code>append</code></span>
+                  <span class="mode-desc">Cualquier archivo. Los datos van al final y el archivo pesa más.</span>
+                  <span class="mode-warn">En PNG, JPEG, PDF o ZIP se nota que sobran datos.</span>
+                </label>
+                <label class="mode-card">
+                  <input type="radio" name="mode" value="lsb" />
+                  <span class="mode-title">Mismas dimensiones <code>LSB</code></span>
+                  <span class="mode-desc">Solo PNG/BMP. Repartido por toda la imagen: más discreto.</span>
+                  <span class="mode-warn">Cabe poco, y la salida siempre es PNG.</span>
+                </label>
+              </fieldset>
+            </section>
 
-            <details class="message-box">
-              <summary>Añadir un mensaje de texto</summary>
-              <input id="msg-subject" type="text" placeholder="Asunto" aria-label="Asunto del mensaje" />
-              <textarea id="msg-text" rows="4" placeholder="Escribe el mensaje…" aria-label="Texto del mensaje"></textarea>
-              <button id="add-message" class="btn btn-secondary">Añadir mensaje a la lista</button>
-            </details>
-          </li>
+            <section class="step">
+              <h2>3. Contraseña</h2>
+              <div class="pw-stack">
+                <div class="pw-wrap">
+                  <input id="password" type="password" placeholder="Contraseña" aria-label="Contraseña" autocomplete="new-password" />
+                  <button type="button" class="pw-eye" data-eye="password" aria-label="Mostrar u ocultar contraseña" title="Mostrar/ocultar">👁</button>
+                </div>
+                <div class="pw-wrap">
+                  <input id="password2" type="password" placeholder="Repite la contraseña" aria-label="Repite la contraseña" autocomplete="new-password" />
+                  <button type="button" class="pw-eye" data-eye="password2" aria-label="Mostrar u ocultar confirmación" title="Mostrar/ocultar">👁</button>
+                </div>
+              </div>
+              <div id="pw-match" class="pw-match" aria-live="polite"></div>
+            </section>
+          </div>
 
-          <li class="step">
-            <h2>Paso 3 — Modo y contraseña</h2>
-            <fieldset class="modes">
-              <legend class="sr-only">Modo de ocultación</legend>
-              <label class="mode-card">
-                <input type="radio" name="mode" value="append" checked />
-                <span class="mode-title">Crece <code>append</code></span>
-                <span class="mode-desc">Cualquier archivo. Los datos se añaden al final y el archivo pesa más.</span>
-                <span class="mode-warn">En PNG, JPEG, PDF o ZIP se nota que sobran datos (no qué son).</span>
-              </label>
-              <label class="mode-card">
-                <input type="radio" name="mode" value="lsb" />
-                <span class="mode-title">Mismas dimensiones <code>LSB</code></span>
-                <span class="mode-desc">Solo PNG/BMP. Repartido por toda la imagen: más discreto.</span>
-                <span class="mode-warn">Cabe poco, y la salida siempre es PNG.</span>
-              </label>
-            </fieldset>
-            <div class="row">
-              <input id="password" type="password" placeholder="Contraseña" aria-label="Contraseña" autocomplete="new-password" />
-              <input id="password2" type="password" placeholder="Repite la contraseña" aria-label="Repite la contraseña" autocomplete="new-password" />
+          <!-- Columna derecha: Contenido + Capacidad + Acción -->
+          <div class="col">
+            <section class="step">
+              <h2>Qué quieres esconder</h2>
+              <div id="items-dropzone" class="dropzone dropzone-compact">
+                <span class="dz-sub">Arrastra archivos aquí o añádelos:</span>
+                <button id="add-file" class="btn btn-secondary">+ Añadir archivo</button>
+              </div>
+              <ul id="item-list" class="item-list"></ul>
+              <div id="usage" class="usage" hidden>
+                <div class="usage-bar"><div id="usage-fill" class="usage-fill"></div></div>
+                <span id="usage-text" class="usage-text" aria-live="polite"></span>
+              </div>
+
+              <details class="message-box">
+                <summary>Añadir un mensaje de texto</summary>
+                <input id="msg-subject" type="text" placeholder="Asunto" aria-label="Asunto del mensaje" />
+                <textarea id="msg-text" rows="4" placeholder="Escribe el mensaje…" aria-label="Texto del mensaje"></textarea>
+                <button id="add-message" class="btn btn-secondary">Añadir mensaje a la lista</button>
+              </details>
+            </section>
+
+            <div class="action-card">
+              <div id="hide-summary" class="summary-pill">Elige un portador y añade al menos un archivo o mensaje.</div>
+              <button id="do-hide" class="btn btn-primary">Esconder y guardar como…</button>
             </div>
-          </li>
-        </ol>
-
-        <div class="action-row">
-          <button id="do-hide" class="btn btn-primary">Esconder y guardar como…</button>
+            <div id="hide-result" class="result" aria-live="polite"></div>
+          </div>
         </div>
-        <div id="hide-result" class="result" aria-live="polite"></div>
       </section>
 
       <!-- ================= EXTRAER ================= -->
       <section id="tab-extract" class="tab-panel" role="tabpanel">
-        <ol class="steps">
-          <li class="step">
-            <h2>Paso 1 — Abrir archivo con datos ocultos</h2>
-            <div class="row">
-              <button id="pick-stego" class="btn">Elegir archivo…</button>
-              <span id="stego-name" class="file-chip">ninguno seleccionado</span>
+        <div class="extract-stack">
+          <section class="step">
+            <h2>1. Archivo con datos ocultos</h2>
+            <div id="stego-dropzone" class="dropzone">
+              <div class="thumb">?</div>
+              <div class="dz-meta">
+                <div id="stego-name" class="dz-title">Ninguno seleccionado</div>
+                <div class="info">Arrastra aquí el archivo o pulsa Elegir…</div>
+              </div>
+              <button id="pick-stego" class="btn">Elegir…</button>
             </div>
-          </li>
-          <li class="step">
-            <h2>Paso 2 — Contraseña</h2>
+          </section>
+
+          <section class="step">
+            <h2>2. Contraseña</h2>
             <div class="row">
-              <input id="extract-password" type="password" placeholder="Contraseña" aria-label="Contraseña del archivo" autocomplete="off" />
-              <button id="do-extract" class="btn btn-primary">Extraer</button>
+              <div class="pw-wrap pw-grow">
+                <input id="extract-password" type="password" placeholder="Contraseña" aria-label="Contraseña del archivo" autocomplete="off" />
+                <button type="button" class="pw-eye" data-eye="extract-password" aria-label="Mostrar u ocultar contraseña" title="Mostrar/ocultar">👁</button>
+              </div>
+              <button id="do-extract" class="btn btn-primary">Extraer en carpeta…</button>
             </div>
-          </li>
-        </ol>
+          </section>
+        </div>
         <div id="extract-result" class="result" aria-live="polite"></div>
       </section>
     </main>

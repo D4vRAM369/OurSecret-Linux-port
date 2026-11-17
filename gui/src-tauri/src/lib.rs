@@ -123,6 +123,13 @@ fn extract_items(
     Ok(result)
 }
 
+/// Comprueba si `carrier_path` es PNG/BMP y devuelve su capacidad LSB en una
+/// sola operación (leyendo solo la cabecera, sin decodificar píxeles).
+#[tauri::command(async)]
+fn probe_lsb_carrier(carrier_path: String) -> Result<Option<usize>, String> {
+    oursecret_core::probe_lsb_capacity(&PathBuf::from(carrier_path)).map_err(|e| e.to_string())
+}
+
 /// Para el modo LSB: cuántos bytes caben en esta imagen, para avisar al
 /// usuario antes de que intente esconder algo demasiado grande.
 #[tauri::command(async)]
@@ -153,6 +160,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             hide_items,
             extract_items,
+            probe_lsb_carrier,
             lsb_capacity,
             is_lsb_carrier,
             file_size
