@@ -1,4 +1,4 @@
-//! Cifrado del contenido oculto.
+//! Cifrado del contenido oculto (formato v3).
 //!
 //! Decisión de arquitectura: el OurSecret original de Windows ofrecía 5 algoritmos
 //! (AES, Blowfish, RC4, TEA, un XOR propio) más MD5/SHA para derivar la
@@ -7,15 +7,26 @@
 //! conocidas, y usar MD5/SHA directo sobre la contraseña es vulnerable a
 //! fuerza bruta con GPU. Este port ofrece un único esquema, moderno y
 //! bien parametrizado, en vez de replicar el menú de opciones original.
+//!
+//! En **v3** se añaden tres mejoras respecto a v2:
+//! 1. `derive_key` devuelve `Zeroizing<[u8; 32]>` directamente.
+//! 2. Separación de dominios mediante `subkey` (BLAKE2b-MAC) para obtener
+//!    claves independientes para cifrado (AES-GCM), máscara de longitud y
+//!    permutación LSB.
+//! 3. `encrypt` y `decrypt` autentican AAD (*Additional Authenticated Data*):
+//!    la sal y la longitud enmascarada quedan vinculadas al tag GCM.
 
 use std::collections::HashMap;
 
-use aes_gcm::aead::{Aead, KeyInit};
+use aes_gcm::aead::{Aead, KeyInit, Payload};
 use aes_gcm::{Aes256Gcm, Key, Nonce};
 use argon2::{Algorithm, Argon2, Params, Version};
+use blake2::digest::consts::U32;
+use blake2::digest::Mac;
+use blake2::{Blake2b, Blake2bMac, Digest};
 use rand::RngCore;
 use rand::SeedableRng;
-use zeroize::Zeroize;
+use zeroize::Zeroizing;
 
 use crate::error::{OurSecretError, Result};
 
@@ -24,6 +35,12 @@ pub const NONCE_LEN: usize = 12;
 /// Tag de autenticación que AES-GCM añade al final del ciphertext.
 pub const GCM_TAG_LEN: usize = 16;
 pub const KEY_LEN: usize = 32; // AES-256
+
+/// Etiquetas de separación de dominios para derivar subclaves desde la clave
+/// maestra de Argon2id (formato v3).
+pub const LABEL_ENC: &[u8] = b"oursecret-v3-enc";
+pub const LABEL_MASK: &[u8] = b"oursecret-v3-mask";
+pub const LABEL_PERM: &[u8] = b"oursecret-v3-perm";
 
 /// Parámetros de Argon2id: el segundo perfil de la RFC 9106 §4
 /// ("si no puedes permitirte 2 GiB"): m = 64 MiB, t = 3, p = 4.
@@ -39,73 +56,73 @@ const ARGON2_M_KIB: u32 = 64 * 1024;
 const ARGON2_T: u32 = 3;
 const ARGON2_P: u32 = 4;
 
-/// Deriva una clave AES-256 a partir de una contraseña y una sal con
-/// Argon2id (parámetros arriba).
+/// Deriva una clave maestra de 256 bits a partir de una contraseña y una sal
+/// con Argon2id (parámetros arriba).
 ///
-/// Por qué Argon2id y no PBKDF2/SHA directo: Argon2id está diseñado para
-/// ser caro en memoria además de en CPU, lo que hace mucho más costoso
-/// montar un ataque de fuerza bruta en GPU/ASIC que con un hash simple.
-pub fn derive_key(password: &str, salt: &[u8; SALT_LEN]) -> Result<[u8; KEY_LEN]> {
+/// Devuelve `Zeroizing<[u8; KEY_LEN]>` para limpiar la RAM automáticamente al
+/// salir de ámbito sin exponer copias intermedias en la pila.
+pub fn derive_key(password: &str, salt: &[u8; SALT_LEN]) -> Result<Zeroizing<[u8; KEY_LEN]>> {
     let params = Params::new(ARGON2_M_KIB, ARGON2_T, ARGON2_P, Some(KEY_LEN))
         .map_err(|e| OurSecretError::Kdf(e.to_string()))?;
-    let mut key = [0u8; KEY_LEN];
+    let mut key = Zeroizing::new([0u8; KEY_LEN]);
     Argon2::new(Algorithm::Argon2id, Version::V0x13, params)
-        .hash_password_into(password.as_bytes(), salt, &mut key)
+        .hash_password_into(password.as_bytes(), salt, &mut *key)
         .map_err(|e| OurSecretError::Kdf(e.to_string()))?;
     Ok(key)
 }
 
-/// Flujo de bytes pseudoaleatorio determinista derivado de la clave, para
-/// los dos modos de `embed`: se usa como máscara XOR de la longitud (que así no viaja
-/// en claro) y como semilla de la permutación de posiciones en LSB.
-///
-/// Usa ChaCha20 sembrado con la clave de 32 bytes que ya salió de Argon2id.
-/// Mismo (clave) => mismo flujo => quien tiene la contraseña reconstruye
-/// máscara y permutación; quien no, ve bytes indistinguibles de ruido.
-pub fn keystream(key: &[u8; KEY_LEN], len: usize) -> Vec<u8> {
-    let mut rng = rand_chacha::ChaCha20Rng::from_seed(*key);
+/// Deriva una subclave de 256 bits con separación de dominios usando
+/// BLAKE2b-MAC con la clave maestra como clave y `label` como contexto.
+pub fn subkey(master: &[u8; KEY_LEN], label: &[u8]) -> Zeroizing<[u8; KEY_LEN]> {
+    let mut mac = <Blake2bMac<U32> as Mac>::new_from_slice(master)
+        .expect("KEY_LEN (32) es siempre válido para BLAKE2b-MAC");
+    mac.update(label);
+    let mut out = Zeroizing::new([0u8; KEY_LEN]);
+    out.copy_from_slice(&mac.finalize().into_bytes());
+    out
+}
+
+/// Hash público BLAKE2b-256 sobre varias piezas (p. ej. semilla pública para
+/// dispersar la cabecera LSB en función de las dimensiones de la imagen).
+pub fn hash_seed(parts: &[&[u8]]) -> [u8; KEY_LEN] {
+    let mut hasher = Blake2b::<U32>::new();
+    for p in parts {
+        hasher.update(p);
+    }
+    let mut out = [0u8; KEY_LEN];
+    out.copy_from_slice(&hasher.finalize());
+    out
+}
+
+/// Flujo de bytes pseudoaleatorio determinista derivado de una semilla de 32 bytes
+/// (p. ej. `subkey(master, LABEL_MASK)`), usado como máscara XOR de la longitud.
+pub fn keystream(seed: &[u8; KEY_LEN], len: usize) -> Vec<u8> {
+    let mut rng = rand_chacha::ChaCha20Rng::from_seed(*seed);
     let mut out = vec![0u8; len];
     rng.fill_bytes(&mut out);
     out
 }
 
 /// Las primeras `k` posiciones de una permutación pseudoaleatoria de
-/// `0..count`, determinista por `key` (todas distintas). En el modo LSB
-/// decide EN QUÉ posiciones de la imagen van los bits del secreto: sin
-/// esto, la inserción es secuencial y el ataque chi-cuadrado por prefijos
-/// la detecta y ubica; con posiciones dispersas por toda la imagen, ese
-/// ataque deja de funcionar.
+/// `0..count`, determinista por `seed` (todas distintas).
 ///
 /// Es un Fisher-Yates *parcial y disperso*: en vez de crear el array
-/// `0..count` entero y barajarlo (4 bytes por byte de píxel: ~144 MB en una
-/// foto de 12 MP), solo apunta en un `HashMap` las casillas que se han
-/// intercambiado. Memoria O(k), no O(count). Y como Fisher-Yates fija la
-/// posición `i` en el paso `i`, las primeras `k` salen iguales pidas `k` o
-/// pidas más: quien extrae puede pedir exactamente las que necesita.
+/// `0..count` entero y barajarlo (~144 MB en una foto de 12 MP), solo apunta
+/// en un `HashMap` las casillas que se han intercambiado. Memoria O(k).
 ///
 /// Escrito a mano (no `SliceRandom::shuffle` ni `gen_range` de `rand`)
 /// porque `rand` no garantiza que esas funciones den el mismo resultado
 /// entre versiones; aquí solo dependemos del flujo ChaCha20, que es un
 /// algoritmo estándar. Lo vigila el test `format_is_pinned`.
-pub fn permutation(key: &[u8; KEY_LEN], count: usize, k: usize) -> Vec<usize> {
+pub fn permutation(seed: &[u8; KEY_LEN], count: usize, k: usize) -> Vec<usize> {
     assert!(
         k <= count,
         "no se pueden sacar {k} posiciones distintas de {count}"
     );
-    // Semilla distinta de la del keystream para no correlacionar máscara y
-    // permutación (dominio separado: segundo bloque del keystream).
-    let mut seed = [0u8; KEY_LEN];
-    let mut rng0 = rand_chacha::ChaCha20Rng::from_seed(*key);
-    rng0.fill_bytes(&mut seed); // descarta el primer bloque (reservado a la máscara)
-    rng0.fill_bytes(&mut seed);
-    let mut rng = rand_chacha::ChaCha20Rng::from_seed(seed);
-    seed.zeroize();
+    let mut rng = rand_chacha::ChaCha20Rng::from_seed(*seed);
     let mut pick_j = |i: usize| i + uniform_below(&mut rng, (count - i) as u64) as usize;
 
-    // Dos caminos, MISMO resultado (lo comprueba `dense_and_sparse_agree`):
-    // - carga grande: array denso de u32 (4 B por posición, como antes);
-    // - carga pequeña: HashMap con solo las casillas tocadas (~40 B cada una,
-    //   como mucho 2k). Con k cerca de count el HashMap gastaría ~10× más.
+    // Dos caminos, MISMO resultado (lo comprueba `dense_and_sparse_agree`).
     if k.saturating_mul(16) > count && u32::try_from(count).is_ok() {
         let mut idx: Vec<u32> = (0..count as u32).collect();
         for i in 0..k {
@@ -154,21 +171,41 @@ pub fn random_nonce() -> [u8; NONCE_LEN] {
     nonce
 }
 
-/// Cifra `plaintext` con AES-256-GCM. GCM es cifrado *autenticado*: además
-/// de ocultar el contenido, detecta si alguien lo modificó (a diferencia
-/// del original, que usaba MD5 como simple checksum de integridad, no
-/// como protección criptográfica real).
-pub fn encrypt(key: &[u8; KEY_LEN], nonce: &[u8; NONCE_LEN], plaintext: &[u8]) -> Result<Vec<u8>> {
+/// Cifra `plaintext` con AES-256-GCM autenticando también `aad` (sal + longitud
+/// enmascarada, aunque no vayan cifrados dentro del payload).
+pub fn encrypt(
+    key: &[u8; KEY_LEN],
+    nonce: &[u8; NONCE_LEN],
+    plaintext: &[u8],
+    aad: &[u8],
+) -> Result<Vec<u8>> {
     let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(key));
     cipher
-        .encrypt(Nonce::from_slice(nonce), plaintext)
-        .map_err(|_| OurSecretError::DecryptionFailed) // encrypt no debería fallar nunca en la práctica
+        .encrypt(
+            Nonce::from_slice(nonce),
+            Payload {
+                msg: plaintext,
+                aad,
+            },
+        )
+        .map_err(|_| OurSecretError::DecryptionFailed)
 }
 
-pub fn decrypt(key: &[u8; KEY_LEN], nonce: &[u8; NONCE_LEN], ciphertext: &[u8]) -> Result<Vec<u8>> {
+pub fn decrypt(
+    key: &[u8; KEY_LEN],
+    nonce: &[u8; NONCE_LEN],
+    ciphertext: &[u8],
+    aad: &[u8],
+) -> Result<Vec<u8>> {
     let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(key));
     cipher
-        .decrypt(Nonce::from_slice(nonce), ciphertext)
+        .decrypt(
+            Nonce::from_slice(nonce),
+            Payload {
+                msg: ciphertext,
+                aad,
+            },
+        )
         .map_err(|_| OurSecretError::DecryptionFailed)
 }
 
@@ -177,27 +214,52 @@ mod tests {
     use super::*;
 
     #[test]
-    fn encrypt_then_decrypt_roundtrip() {
+    fn encrypt_then_decrypt_roundtrip_with_aad() {
         let salt = random_salt();
-        let key = derive_key("correct horse battery staple", &salt).unwrap();
+        let master = derive_key("correct horse battery staple", &salt).unwrap();
+        let enc_key = subkey(&master, LABEL_ENC);
         let nonce = random_nonce();
         let msg = b"hola brian, esto es un mensaje secreto";
+        let aad = b"metadatos-autenticados";
 
-        let ct = encrypt(&key, &nonce, msg).unwrap();
-
-        let pt = decrypt(&key, &nonce, &ct).unwrap();
+        let ct = encrypt(&enc_key, &nonce, msg, aad).unwrap();
+        let pt = decrypt(&enc_key, &nonce, &ct, aad).unwrap();
         assert_eq!(pt, msg);
+
+        // Alterar un solo byte de AAD debe invalidar el tag GCM.
+        assert!(matches!(
+            decrypt(&enc_key, &nonce, &ct, b"metadatos-alterado!"),
+            Err(OurSecretError::DecryptionFailed)
+        ));
+    }
+
+    #[test]
+    fn subkeys_are_domain_separated() {
+        let master = [0x42u8; KEY_LEN];
+        let k_enc = subkey(&master, LABEL_ENC);
+        let k_mask = subkey(&master, LABEL_MASK);
+        let k_perm = subkey(&master, LABEL_PERM);
+        assert_ne!(&*k_enc, &master);
+        assert_ne!(&*k_enc, &*k_mask);
+        assert_ne!(&*k_enc, &*k_perm);
+        assert_ne!(&*k_mask, &*k_perm);
     }
 
     #[test]
     fn wrong_password_fails_to_decrypt() {
         let salt = random_salt();
-        let key_good = derive_key("contraseña-correcta", &salt).unwrap();
-        let key_bad = derive_key("contraseña-incorrecta", &salt).unwrap();
+        let key_good = subkey(
+            &derive_key("contraseña-correcta", &salt).unwrap(),
+            LABEL_ENC,
+        );
+        let key_bad = subkey(
+            &derive_key("contraseña-incorrecta", &salt).unwrap(),
+            LABEL_ENC,
+        );
         let nonce = random_nonce();
 
-        let ct = encrypt(&key_good, &nonce, b"secreto").unwrap();
-        let result = decrypt(&key_bad, &nonce, &ct);
+        let ct = encrypt(&key_good, &nonce, b"secreto", b"aad").unwrap();
+        let result = decrypt(&key_bad, &nonce, &ct, b"aad");
         assert!(matches!(result, Err(OurSecretError::DecryptionFailed)));
     }
 
@@ -219,25 +281,29 @@ mod tests {
 
     #[test]
     fn dense_and_sparse_agree() {
-        // k=10 sobre 100_000 va por el camino HashMap; k=50_000 por el denso.
-        // Las 10 primeras tienen que coincidir: si no, extraer (que pide
-        // exactamente las que necesita) leería otras posiciones que embed.
         let key = [42u8; KEY_LEN];
         let sparse = permutation(&key, 100_000, 10);
         let dense = permutation(&key, 100_000, 50_000);
         assert_eq!(sparse[..], dense[..10]);
     }
 
-    /// Valores dorados. Si este test falla, el formato ha cambiado y TODOS
-    /// los archivos ya generados dejarán de abrirse. Solo se actualiza a
+    /// Valores dorados (formato v3). Si este test falla, el formato ha cambiado
+    /// y TODOS los archivos ya generados dejarán de abrirse. Solo se actualiza a
     /// propósito (y documentándolo), nunca "para que pase".
     #[test]
     fn format_is_pinned() {
-        let key = derive_key("pin", &[1u8; SALT_LEN]).unwrap();
-        assert_eq!(hex(&key[..8]), "3d1a2ff5cf950256");
+        let master = derive_key("pin", &[1u8; SALT_LEN]).unwrap();
+        assert_eq!(hex(&master[..8]), "3d1a2ff5cf950256");
+
+        let k_enc = subkey(&master, LABEL_ENC);
+        let k_mask = subkey(&master, LABEL_MASK);
+        let k_perm = subkey(&master, LABEL_PERM);
+        assert_ne!(&*k_enc, &*k_mask);
+        assert_ne!(&*k_mask, &*k_perm);
+
         assert_eq!(
             permutation(&[9u8; KEY_LEN], 1_000_000, 5),
-            [699281, 264395, 803392, 36706, 402497]
+            [68594, 274221, 257321, 707829, 526672]
         );
         assert_eq!(hex(&keystream(&[9u8; KEY_LEN], 8)), "f2a76980dfc7a492");
     }

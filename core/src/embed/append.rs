@@ -30,7 +30,7 @@ use std::path::Path;
 
 use zeroize::Zeroizing;
 
-use crate::crypto::{self, GCM_TAG_LEN, KEY_LEN, NONCE_LEN, SALT_LEN};
+use crate::crypto::{self, GCM_TAG_LEN, KEY_LEN, LABEL_ENC, LABEL_MASK, NONCE_LEN, SALT_LEN};
 use crate::error::{OurSecretError, Result};
 
 const TRAILER_LEN: usize = 8;
@@ -44,18 +44,25 @@ const TAIL_LEN: usize = SALT_LEN + TRAILER_LEN;
 fn build_tail(plain_blob: &[u8], password: &str) -> Result<Vec<u8>> {
     let salt = crypto::random_salt();
     let nonce = crypto::random_nonce();
-    let key = Zeroizing::new(crypto::derive_key(password, &salt)?);
-    let ciphertext = crypto::encrypt(&key, &nonce, plain_blob)?;
+    let master = crypto::derive_key(password, &salt)?;
+    let k_enc = crypto::subkey(&master, LABEL_ENC);
+    let k_mask = crypto::subkey(&master, LABEL_MASK);
 
-    // payload = nonce || ciphertext (lo que hay entre el portador y la sal).
-    let payload_len = NONCE_LEN + ciphertext.len();
-    let obf = (payload_len as u64) ^ mask_u64(&key);
+    // AES-256-GCM siempre añade GCM_TAG_LEN al texto claro: conocemos `payload_len`
+    // y el trailer antes de cifrar, así que podemos autenticar `salt || trailer` como AAD.
+    let payload_len = NONCE_LEN + plain_blob.len() + GCM_TAG_LEN;
+    let obf = (payload_len as u64) ^ mask_u64(&k_mask);
+    let mut aad = [0u8; TAIL_LEN];
+    aad[..SALT_LEN].copy_from_slice(&salt);
+    aad[SALT_LEN..].copy_from_slice(&obf.to_le_bytes());
+
+    let ciphertext = crypto::encrypt(&k_enc, &nonce, plain_blob, &aad)?;
+    debug_assert_eq!(NONCE_LEN + ciphertext.len(), payload_len);
 
     let mut tail = Vec::with_capacity(payload_len + TAIL_LEN);
     tail.extend_from_slice(&nonce);
     tail.extend_from_slice(&ciphertext);
-    tail.extend_from_slice(&salt);
-    tail.extend_from_slice(&obf.to_le_bytes());
+    tail.extend_from_slice(&aad);
     Ok(tail)
 }
 
@@ -98,8 +105,8 @@ pub fn embed_file(
     Ok(())
 }
 
-/// Valida los últimos `TAIL_LEN` bytes, deriva la clave y devuelve
-/// `(key, payload_len)` si la longitud encaja dentro de `total_len`.
+/// Valida los últimos `TAIL_LEN` bytes, deriva las subclaves y devuelve
+/// `(enc_key, payload_len)` si la longitud encaja dentro de `total_len`.
 fn parse_tail(
     tail: &[u8; TAIL_LEN],
     total_len: u64,
@@ -107,10 +114,12 @@ fn parse_tail(
 ) -> Result<(Zeroizing<[u8; KEY_LEN]>, usize)> {
     let mut salt = [0u8; SALT_LEN];
     salt.copy_from_slice(&tail[..SALT_LEN]);
-    let key = Zeroizing::new(crypto::derive_key(password, &salt)?);
+    let master = crypto::derive_key(password, &salt)?;
+    let k_mask = crypto::subkey(&master, LABEL_MASK);
+    let k_enc = crypto::subkey(&master, LABEL_ENC);
 
     let obf = u64::from_le_bytes(tail[SALT_LEN..].try_into().unwrap());
-    let payload_len_u64 = obf ^ mask_u64(&key);
+    let payload_len_u64 = obf ^ mask_u64(&k_mask);
     let salt_start = total_len - TAIL_LEN as u64;
 
     if payload_len_u64 < MIN_PAYLOAD as u64 || payload_len_u64 > salt_start {
@@ -118,14 +127,14 @@ fn parse_tail(
     }
     let payload_len =
         usize::try_from(payload_len_u64).map_err(|_| OurSecretError::NotAContainer)?;
-    Ok((key, payload_len))
+    Ok((k_enc, payload_len))
 }
 
-fn decrypt_payload(key: &[u8; KEY_LEN], payload: &[u8]) -> Result<Vec<u8>> {
+fn decrypt_payload(key: &[u8; KEY_LEN], payload: &[u8], aad: &[u8; TAIL_LEN]) -> Result<Vec<u8>> {
     let mut nonce = [0u8; NONCE_LEN];
     nonce.copy_from_slice(&payload[..NONCE_LEN]);
     let ciphertext = &payload[NONCE_LEN..];
-    crypto::decrypt(key, &nonce, ciphertext)
+    crypto::decrypt(key, &nonce, ciphertext, aad)
 }
 
 /// Extrae y descifra un archivo generado por `embed`. Devuelve el
@@ -139,7 +148,7 @@ pub fn extract(stego: &[u8], password: &str) -> Result<Vec<u8>> {
     let tail: &[u8; TAIL_LEN] = stego[salt_start..].try_into().unwrap();
     let (key, payload_len) = parse_tail(tail, n as u64, password)?;
     let payload = &stego[salt_start - payload_len..salt_start];
-    decrypt_payload(&key, payload)
+    decrypt_payload(&key, payload, tail)
 }
 
 /// Variante O(1) de [`extract`]: lee solo el final del archivo sin cargar
@@ -159,13 +168,12 @@ pub fn extract_from_file(path: &Path, password: &str) -> Result<Vec<u8>> {
     f.seek(SeekFrom::Start(payload_start))?;
     let mut payload = vec![0u8; payload_len];
     f.read_exact(&mut payload)?;
-    decrypt_payload(&key, &payload)
+    decrypt_payload(&key, &payload, &tail)
 }
 
-/// Primeros 8 bytes del keystream derivado de la clave, como u64 LE. Máscara
-/// XOR de la longitud: oculta cuántos bytes se añadieron.
-fn mask_u64(key: &[u8; KEY_LEN]) -> u64 {
-    let ks = crypto::keystream(key, 8);
+/// Primeros 8 bytes del keystream derivado de la subclave de máscara, como u64 LE.
+fn mask_u64(mask_seed: &[u8; KEY_LEN]) -> u64 {
+    let ks = crypto::keystream(mask_seed, 8);
     u64::from_le_bytes(ks.try_into().unwrap())
 }
 
@@ -216,7 +224,8 @@ mod tests {
         // `claimed`: así se prueban los límites que bytes al azar no alcanzan.
         let total = 200;
         let salt = [3u8; SALT_LEN];
-        let mask = mask_u64(&crypto::derive_key("pw", &salt).unwrap());
+        let master = crypto::derive_key("pw", &salt).unwrap();
+        let mask = mask_u64(&crypto::subkey(&master, LABEL_MASK));
         let salt_start = (total - TAIL_LEN) as u64;
         for claimed in [
             0,

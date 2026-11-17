@@ -2370,6 +2370,7 @@ version = "0.1.0"
 dependencies = [
  "aes-gcm",
  "argon2",
+ "blake2",
  "image",
  "rand",
  "rand_chacha",

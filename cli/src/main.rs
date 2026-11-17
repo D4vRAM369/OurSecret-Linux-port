@@ -221,6 +221,9 @@ fn prompt_password_with_confirmation() -> Result<Zeroizing<String>> {
     if *p1 != *p2 {
         bail!("las contraseñas no coinciden");
     }
+    if p1.chars().count() < 10 {
+        eprintln!("Aviso: contraseña corta (< 10 caracteres); se recomienda una más larga.");
+    }
     Ok(p1)
 }
 

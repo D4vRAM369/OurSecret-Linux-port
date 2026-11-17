@@ -249,7 +249,10 @@ function updatePasswordMatch() {
   }
   if (a === b) {
     pwMatchEl.className = "pw-match ok";
-    pwMatchEl.textContent = "✓ Las contraseñas coinciden";
+    pwMatchEl.textContent =
+      a.length < 10
+        ? "✓ Las contraseñas coinciden (aviso: es corta, usa al menos 10 caracteres)"
+        : "✓ Las contraseñas coinciden";
   } else {
     pwMatchEl.className = "pw-match err";
     pwMatchEl.textContent = "Las contraseñas no coinciden";

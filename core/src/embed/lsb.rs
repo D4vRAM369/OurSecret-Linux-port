@@ -35,9 +35,10 @@
 //! carga. Lo más eficaz sigue siendo esconder poco en imágenes grandes.
 
 use image::{DynamicImage, ImageBuffer, Rgb};
-use zeroize::Zeroizing;
 
-use crate::crypto::{self, GCM_TAG_LEN, KEY_LEN, NONCE_LEN, SALT_LEN};
+use crate::crypto::{
+    self, GCM_TAG_LEN, KEY_LEN, LABEL_ENC, LABEL_MASK, LABEL_PERM, NONCE_LEN, SALT_LEN,
+};
 use crate::error::{OurSecretError, Result};
 
 const SALT_BITS: usize = SALT_LEN * 8; // 128
@@ -63,6 +64,38 @@ pub fn capacity_bytes_for_dimensions(width: u32, height: u32) -> usize {
     raw_len.saturating_sub(OVERHEAD_BITS) / 8
 }
 
+/// Posiciones públicas deterministas para la cabecera (`salt || len_enc`,
+/// 160 bits) dispersadas por toda la imagen según `raw.len()`.
+///
+/// Por qué (formato v3): concentrar los 160 bits siempre en `raw[0..160]`
+/// creaba una densidad de modificación del ~50 % en los primeros ~54 píxeles
+/// de la esquina superior izquierda aunque el secreto fuese diminuto.
+fn header_positions(raw_len: usize) -> Vec<usize> {
+    let seed = crypto::hash_seed(&[b"oursecret-v3-lsb-header", &(raw_len as u64).to_le_bytes()]);
+    crypto::permutation(&seed, raw_len, OVERHEAD_BITS)
+}
+
+/// Biyección estrictamente creciente de `0..(raw_len - OVERHEAD_BITS)` al
+/// conjunto de índices físicos en `0..raw_len` que NO están en `sorted_hdr`.
+fn map_non_header(logical_idx: usize, sorted_hdr: &[usize]) -> usize {
+    let mut phys = logical_idx;
+    for &h in sorted_hdr {
+        if h <= phys {
+            phys += 1;
+        } else {
+            break;
+        }
+    }
+    phys
+}
+
+fn build_lsb_aad(salt: &[u8; SALT_LEN], len_enc: u32) -> [u8; SALT_LEN + 4] {
+    let mut aad = [0u8; SALT_LEN + 4];
+    aad[..SALT_LEN].copy_from_slice(salt);
+    aad[SALT_LEN..].copy_from_slice(&len_enc.to_le_bytes());
+    aad
+}
+
 /// Incrusta `plain_blob` en los LSB de `img`. Devuelve la
 /// imagen resultante, mismas dimensiones, en RGB.
 pub fn embed(img: &DynamicImage, plain_blob: &[u8], password: &str) -> Result<DynamicImage> {
@@ -70,22 +103,15 @@ pub fn embed(img: &DynamicImage, plain_blob: &[u8], password: &str) -> Result<Dy
     let (width, height) = rgb.dimensions();
     let mut raw = rgb.into_raw();
 
-    let salt = crypto::random_salt();
-    let nonce = crypto::random_nonce();
-    let key = Zeroizing::new(crypto::derive_key(password, &salt)?);
-    let ciphertext = crypto::encrypt(&key, &nonce, plain_blob)?;
-
-    // payload = nonce || ciphertext (lo que se dispersa por la imagen).
-    let mut payload = Vec::with_capacity(NONCE_LEN + ciphertext.len());
-    payload.extend_from_slice(&nonce);
-    payload.extend_from_slice(&ciphertext);
-
+    // Comprobación de capacidad antes de derivar la clave (si no cabe ni la
+    // cabecera o el payload, fallamos rápido sin gastar Argon2id).
+    let expected_payload_len = NONCE_LEN + plain_blob.len() + GCM_TAG_LEN;
     let payload_len_u32 =
-        u32::try_from(payload.len()).map_err(|_| OurSecretError::InsufficientCapacity {
-            needed: payload.len() + OVERHEAD_BITS.div_ceil(8),
+        u32::try_from(expected_payload_len).map_err(|_| OurSecretError::InsufficientCapacity {
+            needed: expected_payload_len + OVERHEAD_BITS.div_ceil(8),
             available: raw.len() / 8,
         })?;
-    let needed_bits = OVERHEAD_BITS + payload.len() * 8;
+    let needed_bits = OVERHEAD_BITS + expected_payload_len * 8;
     if needed_bits > raw.len() {
         return Err(OurSecretError::InsufficientCapacity {
             needed: needed_bits.div_ceil(8),
@@ -93,23 +119,40 @@ pub fn embed(img: &DynamicImage, plain_blob: &[u8], password: &str) -> Result<Dy
         });
     }
 
-    // 1) sal en claro en las primeras 128 posiciones.
+    let salt = crypto::random_salt();
+    let nonce = crypto::random_nonce();
+    let master = crypto::derive_key(password, &salt)?;
+    let k_enc = crypto::subkey(&master, LABEL_ENC);
+    let k_mask = crypto::subkey(&master, LABEL_MASK);
+    let k_perm = crypto::subkey(&master, LABEL_PERM);
+
+    let len_enc = payload_len_u32 ^ mask_u32(&k_mask);
+    let aad = build_lsb_aad(&salt, len_enc);
+    let ciphertext = crypto::encrypt(&k_enc, &nonce, plain_blob, &aad)?;
+    debug_assert_eq!(NONCE_LEN + ciphertext.len(), expected_payload_len);
+
+    // payload = nonce || ciphertext (lo que se dispersa por la imagen).
+    let mut payload = Vec::with_capacity(expected_payload_len);
+    payload.extend_from_slice(&nonce);
+    payload.extend_from_slice(&ciphertext);
+
+    // 1) Cabecera (sal + longitud enmascarada) en 160 posiciones dispersas por toda la imagen.
+    let hdr_pos = header_positions(raw.len());
     for (i, bit) in bits_of_bytes(&salt).enumerate() {
-        set_lsb(&mut raw[i], bit);
+        set_lsb(&mut raw[hdr_pos[i]], bit);
     }
-
-    // 2) longitud del payload (u32) XOR máscara de clave, posiciones 128..160.
-    let len_enc = payload_len_u32 ^ mask_u32(&key);
     for (i, bit) in bits_of_u32(len_enc).into_iter().enumerate() {
-        set_lsb(&mut raw[SALT_BITS + i], bit);
+        set_lsb(&mut raw[hdr_pos[SALT_BITS + i]], bit);
     }
 
-    // 3) payload en posiciones permutadas dentro de [160..N).
-    let perm = crypto::permutation(&key, raw.len() - OVERHEAD_BITS, payload.len() * 8);
+    // 2) Payload en posiciones permutadas dentro de los índices restantes.
+    let mut sorted_hdr = hdr_pos;
+    sorted_hdr.sort_unstable();
+    let perm = crypto::permutation(&k_perm, raw.len() - OVERHEAD_BITS, payload.len() * 8);
     let mut bit_idx = 0;
     for &byte in &payload {
         for b in (0..8).rev() {
-            let pos = OVERHEAD_BITS + perm[bit_idx];
+            let pos = map_non_header(perm[bit_idx], &sorted_hdr);
             set_lsb(&mut raw[pos], (byte >> b) & 1);
             bit_idx += 1;
         }
@@ -127,40 +170,46 @@ pub fn extract(img: &DynamicImage, password: &str) -> Result<Vec<u8>> {
         return Err(OurSecretError::NotAContainer);
     }
 
-    // 1) sal (pública) → clave.
+    let hdr_pos = header_positions(raw.len());
+
+    // 1) sal (pública) → subclaves.
     let mut salt = [0u8; SALT_LEN];
     for (i, b) in salt.iter_mut().enumerate() {
         let mut v = 0u8;
         for k in 0..8 {
-            v = (v << 1) | get_lsb(raw[i * 8 + k]);
+            v = (v << 1) | get_lsb(raw[hdr_pos[i * 8 + k]]);
         }
         *b = v;
     }
-    let key = Zeroizing::new(crypto::derive_key(password, &salt)?);
+    let master = crypto::derive_key(password, &salt)?;
+    let k_mask = crypto::subkey(&master, LABEL_MASK);
+    let k_perm = crypto::subkey(&master, LABEL_PERM);
+    let k_enc = crypto::subkey(&master, LABEL_ENC);
 
     // 2) longitud cifrada.
     let mut len_bits = [0u8; LEN_BITS];
     for (i, bit) in len_bits.iter_mut().enumerate() {
-        *bit = get_lsb(raw[SALT_BITS + i]);
+        *bit = get_lsb(raw[hdr_pos[SALT_BITS + i]]);
     }
-    let payload_len = (u32_of_bits(&len_bits) ^ mask_u32(&key)) as usize;
+    let len_enc = u32_of_bits(&len_bits);
+    let payload_len = (len_enc ^ mask_u32(&k_mask)) as usize;
 
     // Si la longitud no cabe o es absurda: no es nuestro (o clave mala).
-    // `payload_len > avail / 8` equivale a `payload_len * 8 > avail` pero sin
-    // multiplicar un valor que viene del archivo (en 32 bits desbordaría).
     let avail = raw.len() - OVERHEAD_BITS;
     if payload_len < MIN_PAYLOAD || payload_len > avail / 8 {
         return Err(OurSecretError::NotAContainer);
     }
 
-    // 3) payload desde las posiciones permutadas.
-    let perm = crypto::permutation(&key, avail, payload_len * 8);
+    // 3) payload desde las posiciones permutadas (excluyendo la cabecera).
+    let mut sorted_hdr = hdr_pos;
+    sorted_hdr.sort_unstable();
+    let perm = crypto::permutation(&k_perm, avail, payload_len * 8);
     let mut payload = vec![0u8; payload_len];
     let mut bit_idx = 0;
     for out_byte in payload.iter_mut() {
         let mut v = 0u8;
         for _ in 0..8 {
-            let pos = OVERHEAD_BITS + perm[bit_idx];
+            let pos = map_non_header(perm[bit_idx], &sorted_hdr);
             v = (v << 1) | get_lsb(raw[pos]);
             bit_idx += 1;
         }
@@ -170,11 +219,12 @@ pub fn extract(img: &DynamicImage, password: &str) -> Result<Vec<u8>> {
     let mut nonce = [0u8; NONCE_LEN];
     nonce.copy_from_slice(&payload[..NONCE_LEN]);
     let ciphertext = &payload[NONCE_LEN..];
-    crypto::decrypt(&key, &nonce, ciphertext)
+    let aad = build_lsb_aad(&salt, len_enc);
+    crypto::decrypt(&k_enc, &nonce, ciphertext, &aad)
 }
 
-fn mask_u32(key: &[u8; KEY_LEN]) -> u32 {
-    let ks = crypto::keystream(key, 4);
+fn mask_u32(mask_seed: &[u8; KEY_LEN]) -> u32 {
+    let ks = crypto::keystream(mask_seed, 4);
     u32::from_le_bytes(ks.try_into().unwrap())
 }
 
@@ -285,13 +335,18 @@ mod tests {
     /// Imagen cuyos LSB dicen: sal = ceros, longitud descifrada con "pw" =
     /// `claimed`. El resto de píxeles, basura. Así se prueban los valores
     /// límite *después* de la KDF, que bytes al azar casi nunca alcanzan.
-    fn crafted(w: u32, h: u32, key: &[u8; KEY_LEN], claimed: u32) -> DynamicImage {
+    fn crafted(w: u32, h: u32, mask_key: &[u8; KEY_LEN], claimed: u32) -> DynamicImage {
         let mut raw: Vec<u8> = (0..w * h * 3).map(|i| (i * 37 % 251) as u8).collect();
-        for b in raw.iter_mut().take(SALT_BITS) {
-            *b &= 0b1111_1110; // sal = 16 bytes a cero
+        let hdr_pos = header_positions(raw.len());
+        for &p in hdr_pos.iter().take(SALT_BITS) {
+            raw[p] &= 0b1111_1110; // sal = 16 bytes a cero
         }
-        for (i, bit) in bits_of_u32(claimed ^ mask_u32(key)).into_iter().enumerate() {
-            raw[SALT_BITS + i] = (raw[SALT_BITS + i] & 0b1111_1110) | bit;
+        for (i, bit) in bits_of_u32(claimed ^ mask_u32(mask_key))
+            .into_iter()
+            .enumerate()
+        {
+            let p = hdr_pos[SALT_BITS + i];
+            raw[p] = (raw[p] & 0b1111_1110) | bit;
         }
         DynamicImage::ImageRgb8(ImageBuffer::from_raw(w, h, raw).unwrap())
     }
@@ -304,7 +359,8 @@ mod tests {
             assert!(extract(&img, "pw").is_err(), "{w}x{h}");
         }
 
-        let key = crypto::derive_key("pw", &[0u8; SALT_LEN]).unwrap();
+        let master = crypto::derive_key("pw", &[0u8; SALT_LEN]).unwrap();
+        let mask_key = crypto::subkey(&master, LABEL_MASK);
         let (w, h) = (20u32, 20u32);
         let max = ((w * h * 3) as usize - OVERHEAD_BITS) / 8; // payload máximo que cabe
         for claimed in [
@@ -315,7 +371,7 @@ mod tests {
             max as u32 + 1,     // un byte de más
             u32::MAX,           // ×8 desbordaría en 32 bits
         ] {
-            let err = extract(&crafted(w, h, &key, claimed), "pw").unwrap_err();
+            let err = extract(&crafted(w, h, &mask_key, claimed), "pw").unwrap_err();
             assert!(
                 matches!(
                     err,
