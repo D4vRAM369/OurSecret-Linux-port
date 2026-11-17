@@ -65,7 +65,12 @@ async function selectCarrier(picked) {
     // LSB solo funciona con PNG/BMP: si no lo es, se desactiva de verdad
     // (no basta con decirlo en el texto) y se vuelve a "crece".
     lsbRadio.disabled = !isImage;
-    if (!isImage && lsbRadio.checked) appendRadio.checked = true;
+    if (!isImage && lsbRadio.checked) {
+      appendRadio.checked = true;
+    } else if (isImage && (items.length === 0 || estimatedPayloadBytes() <= cap)) {
+      // Si el portador es PNG/BMP y el contenido cabe, preseleccionamos LSB por ser más discreto.
+      lsbRadio.checked = true;
+    }
     const sizeLabel = size != null ? `${formatBytes(size)} · ` : "";
     if (isImage) {
       carrierCapacity = cap;
