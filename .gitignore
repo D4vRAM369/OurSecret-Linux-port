@@ -4,6 +4,10 @@
 # Documentación de aprendizaje (Chronicler) — se queda local, no se versiona
 /docs
 
+# Guías locales de agentes IA — no se versionan
+CLAUDE.md
+AGENTS.md
+
 # El instalador/binario original de OurSecret (Windows, SecureKit.net).
 # Es freeware pero no es nuestro para redistribuir empaquetado dentro de
 # este repo — cada quien se lo descarga de la fuente original si lo
