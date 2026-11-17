@@ -14,6 +14,7 @@ use std::path::PathBuf;
 
 use oursecret_core::{EmbedMode, Item};
 use serde::{Deserialize, Serialize};
+use zeroize::Zeroizing;
 
 /// Representación de un `Item` que sí se puede mandar por el puente
 /// JSON de Tauri (serde). `oursecret_core::Item` no deriva Serialize
@@ -58,6 +59,7 @@ fn hide_items(
     password: String,
     mode: String,
 ) -> Result<(), String> {
+    let password = Zeroizing::new(password);
     if items.is_empty() {
         return Err("no hay nada que esconder: añade al menos un archivo o un mensaje".into());
     }
@@ -91,6 +93,7 @@ fn extract_items(
     out_dir: String,
     password: String,
 ) -> Result<Vec<ExtractedItem>, String> {
+    let password = Zeroizing::new(password);
     let items =
         oursecret_core::read(&PathBuf::from(&input_path), &password).map_err(|e| e.to_string())?;
 
@@ -134,9 +137,11 @@ fn probe_lsb_carrier(carrier_path: String) -> Result<Option<usize>, String> {
 /// la GUI antes de intentar esconder (y fallar por falta de sitio).
 #[tauri::command(async)]
 fn file_size(path: String) -> Result<u64, String> {
-    std::fs::metadata(&path)
-        .map(|m| m.len())
-        .map_err(|e| e.to_string())
+    let meta = std::fs::metadata(&path).map_err(|e| e.to_string())?;
+    if meta.is_dir() {
+        return Err("es una carpeta; selecciona archivos individuales".into());
+    }
+    Ok(meta.len())
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]

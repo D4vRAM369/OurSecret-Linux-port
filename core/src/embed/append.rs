@@ -82,7 +82,13 @@ pub fn embed_file(
 
     if same_file {
         let mut out = OpenOptions::new().append(true).open(output_path)?;
-        out.write_all(&tail)?;
+        let orig_len = out.metadata()?.len();
+        if let Err(e) = out.write_all(&tail) {
+            // Si falla a mitad (p. ej. disco lleno), restauramos el tamaño original
+            // para no dejar el portador truncado o corrupto.
+            let _ = out.set_len(orig_len);
+            return Err(e.into());
+        }
     } else {
         let mut src = File::open(carrier_path)?;
         let mut out = File::create(output_path)?;

@@ -83,6 +83,7 @@ async function selectCarrier(picked) {
 
 async function addFiles(paths) {
   const skipped = [];
+  const dirs = [];
   for (const p of paths) {
     const label = basename(p);
     const dup = items.some((it) => it.kind === "file" && it.label === label);
@@ -90,17 +91,30 @@ async function addFiles(paths) {
       skipped.push(label);
       continue;
     }
-    // Sin tamaño (null) el archivo se esconde igual; solo falta en la barra.
-    const size = await invoke("file_size", { path: p }).catch(() => null);
+    let size = null;
+    try {
+      size = await invoke("file_size", { path: p });
+    } catch (err) {
+      if (String(err).includes("carpeta")) {
+        dirs.push(label);
+        continue;
+      }
+      // Sin tamaño (null) el archivo se esconde igual; solo falta en la barra.
+    }
     items.push({ kind: "file", path: p, label, size });
   }
   renderItems();
+  const warnings = [];
+  if (dirs.length > 0) {
+    warnings.push(`No se pueden añadir carpetas (${dirs.join(", ")}); selecciona archivos.`);
+  }
   if (skipped.length > 0) {
-    showResult(
-      hideResultEl,
-      `Ya había archivo(s) con el mismo nombre (${skipped.join(", ")}); renómbralo antes de añadirlo.`,
-      false
+    warnings.push(
+      `Ya había archivo(s) con el mismo nombre (${skipped.join(", ")}); renómbralo antes de añadirlo.`
     );
+  }
+  if (warnings.length > 0) {
+    showResult(hideResultEl, warnings.join(" "), false);
   }
 }
 

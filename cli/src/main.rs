@@ -11,6 +11,7 @@ use std::path::PathBuf;
 use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand};
 use oursecret_core::{EmbedMode, Item};
+use zeroize::Zeroizing;
 
 #[derive(Parser)]
 #[command(name = "oursecret", version, about = "Esteganografía + cifrado: esconde archivos o mensajes dentro de otro archivo", long_about = None)]
@@ -138,10 +139,10 @@ fn cmd_hide(
         });
     }
 
-    let password = match password {
+    let password = Zeroizing::new(match password {
         Some(p) => p,
-        None => prompt_password_with_confirmation()?,
-    };
+        None => prompt_password_with_confirmation()?.to_string(),
+    });
 
     oursecret_core::hide(&carrier, &items, &password, mode, &output)?;
     println!(
@@ -153,10 +154,10 @@ fn cmd_hide(
 }
 
 fn cmd_extract(input: PathBuf, out_dir: PathBuf, password: Option<String>) -> Result<()> {
-    let password = match password {
+    let password = Zeroizing::new(match password {
         Some(p) => p,
         None => rpassword::prompt_password("Contraseña: ")?,
-    };
+    });
 
     let items = oursecret_core::read(&input, &password)?;
     std::fs::create_dir_all(&out_dir)?;
@@ -214,10 +215,10 @@ fn cmd_capacity(carrier: PathBuf) -> Result<()> {
     Ok(())
 }
 
-fn prompt_password_with_confirmation() -> Result<String> {
-    let p1 = rpassword::prompt_password("Contraseña: ")?;
-    let p2 = rpassword::prompt_password("Repite la contraseña: ")?;
-    if p1 != p2 {
+fn prompt_password_with_confirmation() -> Result<Zeroizing<String>> {
+    let p1 = Zeroizing::new(rpassword::prompt_password("Contraseña: ")?);
+    let p2 = Zeroizing::new(rpassword::prompt_password("Repite la contraseña: ")?);
+    if *p1 != *p2 {
         bail!("las contraseñas no coinciden");
     }
     Ok(p1)
