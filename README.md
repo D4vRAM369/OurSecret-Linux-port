@@ -47,7 +47,7 @@ Aplicación nativa construida con **Tauri 2** y detección automática de idioma
 - **Pestaña Esconder (2 columnas)**: selecciona o arrastra el archivo portador (preselecciona `LSB` automáticamente si es PNG/BMP y el contenido cabe), añade archivos (con rechazo temprano de carpetas y duplicados), o mensajes, y define la contraseña (con indicador de coincidencia y aviso si es corta). Nunca sobrescribe el portador original sin confirmación explícita mediante diálogo *Guardar como…*.
 - **Pestaña Extraer**: arrastra o selecciona el archivo contenedor, introduce la contraseña y elige la carpeta de destino. Muestra los mensajes extraídos de forma segura y permite copiar texto o rutas al portapapeles.
 
-<!-- Añade aquí una captura de la GUI tras compilarla: ![Captura de OurSecret Linux](assets/gui-preview.png) -->
+![Captura de OurSecret Linux](assets/gui-preview.png)
 
 ### Línea de comandos (`oursecret`)
 

@@ -3,8 +3,8 @@ import { STRINGS, detectInitialLang, saveLang } from "./i18n.js";
 // Sin bundler (frontendDist: "../src"): un `import "@tauri-apps/api"` no
 // resolvería y abortaría todo el módulo. Se usa el global que inyecta
 // `withGlobalTauri: true` en tauri.conf.json.
-const invoke = window.__TAURI__.core.invoke;
-const { open, save } = window.__TAURI__.dialog;
+const invoke = window.__TAURI__?.core?.invoke;
+const { open, save } = window.__TAURI__?.dialog ?? {};
 
 let currentLang = detectInitialLang();
 const t = () => STRINGS[currentLang];
