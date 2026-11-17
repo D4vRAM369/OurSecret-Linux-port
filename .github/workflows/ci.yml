@@ -30,7 +30,9 @@ jobs:
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace
       - name: Comprobar sintaxis del frontend JS
-        run: node --check gui/src/main.js
+        run: |
+          node --check gui/src/main.js
+          node --check gui/src/i18n.js
       - name: Comprobar que el HTML cumple la CSP (sin scripts ni handlers inline)
         run: |
           if grep -nP '<script(?![^>]*\bsrc=)|\son[a-z]+\s*=|javascript:' gui/src/index.html; then

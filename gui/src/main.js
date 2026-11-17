@@ -1,8 +1,13 @@
+import { STRINGS, detectInitialLang, saveLang } from "./i18n.js";
+
 // Sin bundler (frontendDist: "../src"): un `import "@tauri-apps/api"` no
 // resolvería y abortaría todo el módulo. Se usa el global que inyecta
 // `withGlobalTauri: true` en tauri.conf.json.
 const invoke = window.__TAURI__.core.invoke;
 const { open, save } = window.__TAURI__.dialog;
+
+let currentLang = detectInitialLang();
+const t = () => STRINGS[currentLang];
 
 // ---------- Tabs ----------
 document.querySelectorAll(".tab-btn").forEach((btn) => {
@@ -29,6 +34,7 @@ document.querySelectorAll("[data-eye]").forEach((eyeBtn) => {
 
 // ---------- Estado del flujo "Esconder" ----------
 let carrierPath = null;
+let carrierSize = null;
 let carrierCapacity = null; // bytes en modo LSB; null si el portador no es imagen
 let items = []; // [{kind:'file', path, label, size} | {kind:'message', subject, text}]
 
@@ -44,6 +50,22 @@ const appendRadio = document.querySelector('input[name="mode"][value="append"]')
 const pw1El = document.getElementById("password");
 const pw2El = document.getElementById("password2");
 const pwMatchEl = document.getElementById("pw-match");
+const langSwitchBtn = document.getElementById("lang-switch");
+
+function renderCarrierInfo() {
+  if (!carrierPath) {
+    carrierNameEl.textContent = t().carrier_none;
+    carrierThumbEl.textContent = t().thumb_default;
+    carrierInfoEl.textContent = t().carrier_hint_default;
+    return;
+  }
+  const sizeLabel = carrierSize != null ? `${formatBytes(carrierSize)} · ` : "";
+  if (carrierCapacity !== null) {
+    carrierInfoEl.textContent = t().carrier_lsb_ok(sizeLabel, formatBytes(carrierCapacity));
+  } else {
+    carrierInfoEl.textContent = t().carrier_append_only(sizeLabel);
+  }
+}
 
 async function selectCarrier(picked) {
   carrierPath = picked;
@@ -53,14 +75,16 @@ async function selectCarrier(picked) {
   carrierThumbEl.classList.remove("is-image");
   // Se vacía ANTES de preguntar: si algo falla a mitad, no puede quedar a la
   // vista la información del portador anterior junto al nombre del nuevo.
-  carrierInfoEl.textContent = "Analizando…";
+  carrierInfoEl.textContent = t().analyzing;
   carrierCapacity = null;
+  carrierSize = null;
 
   try {
     const [cap, size] = await Promise.all([
       invoke("probe_lsb_carrier", { carrierPath }),
       invoke("file_size", { path: carrierPath }).catch(() => null),
     ]);
+    carrierSize = size;
     const isImage = cap !== null;
     // LSB solo funciona con PNG/BMP: si no lo es, se desactiva de verdad
     // (no basta con decirlo en el texto) y se vuelve a "crece".
@@ -71,16 +95,13 @@ async function selectCarrier(picked) {
       // Si el portador es PNG/BMP y el contenido cabe, preseleccionamos LSB por ser más discreto.
       lsbRadio.checked = true;
     }
-    const sizeLabel = size != null ? `${formatBytes(size)} · ` : "";
     if (isImage) {
       carrierCapacity = cap;
       carrierThumbEl.classList.add("is-image");
-      carrierInfoEl.textContent = `${sizeLabel}PNG/BMP: admite ambos modos. En LSB caben ~${formatBytes(carrierCapacity)}.`;
-    } else {
-      carrierInfoEl.textContent = `${sizeLabel}No es PNG/BMP: solo disponible el modo crece (append).`;
     }
+    renderCarrierInfo();
   } catch (err) {
-    carrierInfoEl.textContent = `No se pudo analizar el portador: ${err}`;
+    carrierInfoEl.textContent = t().carrier_probe_err(err);
   }
   updateUsage();
   updateSummary();
@@ -111,12 +132,10 @@ async function addFiles(paths) {
   renderItems();
   const warnings = [];
   if (dirs.length > 0) {
-    warnings.push(`No se pueden añadir carpetas (${dirs.join(", ")}); selecciona archivos.`);
+    warnings.push(t().warn_dirs(dirs.join(", ")));
   }
   if (skipped.length > 0) {
-    warnings.push(
-      `Ya había archivo(s) con el mismo nombre (${skipped.join(", ")}); renómbralo antes de añadirlo.`
-    );
+    warnings.push(t().warn_dups(skipped.join(", ")));
   }
   if (warnings.length > 0) {
     showResult(hideResultEl, warnings.join(" "), false);
@@ -124,7 +143,7 @@ async function addFiles(paths) {
 }
 
 document.getElementById("pick-carrier").addEventListener("click", async () => {
-  const picked = await open({ multiple: false, title: "Elige el archivo portador" });
+  const picked = await open({ multiple: false, title: t().dialog_pick_carrier });
   if (picked) await selectCarrier(picked);
 });
 
@@ -136,7 +155,7 @@ document.querySelectorAll('input[name="mode"]').forEach((r) =>
 );
 
 document.getElementById("add-file").addEventListener("click", async () => {
-  const picked = await open({ multiple: true, title: "Elige archivo(s) a esconder" });
+  const picked = await open({ multiple: true, title: t().dialog_pick_files });
   if (!picked) return;
   await addFiles(Array.isArray(picked) ? picked : [picked]);
 });
@@ -147,7 +166,7 @@ document.getElementById("add-message").addEventListener("click", () => {
   // la sangría y los saltos del principio/final se perderían al esconderlo.
   const text = document.getElementById("msg-text").value;
   if (!subject || !text.trim()) {
-    return showResult(hideResultEl, "Escribe un asunto y un texto para el mensaje.", false);
+    return showResult(hideResultEl, t().err_msg_empty, false);
   }
   items.push({ kind: "message", subject, text });
   document.getElementById("msg-subject").value = "";
@@ -160,7 +179,7 @@ function renderItems() {
   if (items.length === 0) {
     const li = document.createElement("li");
     li.className = "empty";
-    li.textContent = "Todavía no has añadido nada.";
+    li.textContent = t().items_empty;
     itemListEl.appendChild(li);
   }
   items.forEach((item, idx) => {
@@ -168,15 +187,15 @@ function renderItems() {
     const label =
       item.kind === "file"
         ? `📄 ${item.label}${item.size != null ? ` · ${formatBytes(item.size)}` : ""}`
-        : `✉️ Mensaje: "${item.subject}"`;
+        : t().item_msg_label(item.subject);
     // textContent, nunca innerHTML: el nombre de un archivo del disco puede
     // contener "<img onerror=...>" y se ejecutaría como código.
     const span = document.createElement("span");
     span.textContent = label;
     li.appendChild(span);
     const removeBtn = document.createElement("button");
-    removeBtn.textContent = "quitar";
-    removeBtn.setAttribute("aria-label", `Quitar ${label}`);
+    removeBtn.textContent = t().btn_remove;
+    removeBtn.setAttribute("aria-label", t().btn_remove_aria(label));
     removeBtn.addEventListener("click", () => {
       items.splice(idx, 1);
       renderItems();
@@ -218,20 +237,20 @@ function updateUsage() {
   usageEl.classList.toggle("over", over);
   usageFillEl.style.width = `${Math.min(100, (used / carrierCapacity) * 100)}%`;
   usageTextEl.textContent = over
-    ? `No cabe: ~${formatBytes(used)} de ~${formatBytes(carrierCapacity)}. Quita algo o usa el modo crece.`
-    : `~${formatBytes(used)} de ~${formatBytes(carrierCapacity)}${unknown ? " (sin contar algún archivo ilegible)" : ""}`;
+    ? t().usage_over(formatBytes(used), formatBytes(carrierCapacity))
+    : t().usage_ok(formatBytes(used), formatBytes(carrierCapacity), unknown);
 }
 
 function updateSummary() {
   if (!carrierPath && items.length === 0) {
-    hideSummaryEl.textContent = "Elige un portador y añade al menos un archivo o mensaje.";
+    hideSummaryEl.textContent = t().summary_empty;
     return;
   }
   const mode = document.querySelector('input[name="mode"]:checked').value;
   const count = items.length;
-  const est = count > 0 ? `~${formatBytes(estimatedPayloadBytes())}` : "0 bytes";
-  const outHint = carrierPath ? ` · Salida: ${suggestOutputName(carrierPath, mode)}` : "";
-  hideSummaryEl.textContent = `${count} elemento(s) (${est}) · Modo ${mode.toUpperCase()}${outHint}`;
+  const est = count > 0 ? `~${formatBytes(estimatedPayloadBytes())}` : "0 B";
+  const outHint = carrierPath ? t().summary_out(suggestOutputName(carrierPath, mode)) : "";
+  hideSummaryEl.textContent = t().summary_text(count, est, mode.toUpperCase(), outHint);
 }
 
 function updatePasswordMatch() {
@@ -244,18 +263,15 @@ function updatePasswordMatch() {
   }
   if (!b) {
     pwMatchEl.className = "pw-match";
-    pwMatchEl.textContent = "Repite la contraseña para confirmar.";
+    pwMatchEl.textContent = t().pw_repeat_hint;
     return;
   }
   if (a === b) {
     pwMatchEl.className = "pw-match ok";
-    pwMatchEl.textContent =
-      a.length < 10
-        ? "✓ Las contraseñas coinciden (aviso: es corta, usa al menos 10 caracteres)"
-        : "✓ Las contraseñas coinciden";
+    pwMatchEl.textContent = a.length < 10 ? t().pw_match_short : t().pw_match_ok;
   } else {
     pwMatchEl.className = "pw-match err";
-    pwMatchEl.textContent = "Las contraseñas no coinciden";
+    pwMatchEl.textContent = t().pw_match_err;
   }
 }
 
@@ -268,21 +284,21 @@ hideBtn.addEventListener("click", async () => {
   hideResultEl.textContent = "";
 
   if (!carrierPath) {
-    return showResult(hideResultEl, "Elige primero un archivo portador.", false);
+    return showResult(hideResultEl, t().err_no_carrier, false);
   }
   if (items.length === 0) {
-    return showResult(hideResultEl, "Añade al menos un archivo o un mensaje.", false);
+    return showResult(hideResultEl, t().err_no_items, false);
   }
   if (!pw1El.value) {
-    return showResult(hideResultEl, "Escribe una contraseña.", false);
+    return showResult(hideResultEl, t().err_no_pw, false);
   }
   if (pw1El.value !== pw2El.value) {
-    return showResult(hideResultEl, "Las contraseñas no coinciden.", false);
+    return showResult(hideResultEl, t().err_pw_mismatch, false);
   }
   const mode = document.querySelector('input[name="mode"]:checked').value;
 
   const outputPath = await save({
-    title: "Guardar como…",
+    title: t().dialog_save_as,
     defaultPath: suggestOutputName(carrierPath, mode),
   });
   if (!outputPath) return;
@@ -304,9 +320,9 @@ hideBtn.addEventListener("click", async () => {
       });
       pw1El.value = pw2El.value = ""; // que no quede a la vista de quien venga después
       updatePasswordMatch();
-      showResult(hideResultEl, `Listo. Guardado en:\n${outputPath}`, true);
+      showResult(hideResultEl, t().hide_ok(outputPath), true);
     } catch (err) {
-      showResult(hideResultEl, `Error: ${err}`, false);
+      showResult(hideResultEl, t().err_prefix(err), false);
     }
   });
 });
@@ -323,21 +339,21 @@ function selectStego(picked) {
 }
 
 document.getElementById("pick-stego").addEventListener("click", async () => {
-  const picked = await open({ multiple: false, title: "Elige el archivo con datos ocultos" });
+  const picked = await open({ multiple: false, title: t().dialog_pick_stego });
   if (picked) selectStego(picked);
 });
 
 extractBtn.addEventListener("click", async () => {
   extractResultEl.replaceChildren();
   if (!stegoPath) {
-    return showResult(extractResultEl, "Elige primero un archivo.", false);
+    return showResult(extractResultEl, t().extract_err_no_file, false);
   }
   const pwEl = document.getElementById("extract-password");
   if (!pwEl.value) {
-    return showResult(extractResultEl, "Escribe la contraseña.", false);
+    return showResult(extractResultEl, t().err_no_pw, false);
   }
 
-  const outDir = await open({ directory: true, title: "Carpeta donde guardar los archivos extraídos" });
+  const outDir = await open({ directory: true, title: t().dialog_pick_outdir });
   if (!outDir) return;
 
   await whileBusy(extractBtn, extractResultEl, async () => {
@@ -350,7 +366,7 @@ extractBtn.addEventListener("click", async () => {
       pwEl.value = "";
       // El verde es para la línea de estado, no para el contenido extraído.
       extractResultEl.className = "result";
-      extractResultEl.replaceChildren(textDiv("status-ok", `Extraído(s) ${results.length} elemento(s):`));
+      extractResultEl.replaceChildren(textDiv("status-ok", t().extract_ok_count(results.length)));
       results.forEach((item) => {
         const div = document.createElement("div");
         div.className = "extracted-item";
@@ -360,20 +376,24 @@ extractBtn.addEventListener("click", async () => {
         // contraseña): es texto no confiable. Con innerHTML, un asunto como
         // "<img src=x onerror=...>" ejecutaría JS con acceso a window.__TAURI__.
         if (item.kind === "file") {
-          body.append(textDiv("k", "archivo"), textDiv("", item.name), textDiv("hint", item.saved_to));
-          div.append(body, makeCopyButton("Copiar ruta", item.saved_to));
+          body.append(
+            textDiv("k", t().kind_file),
+            textDiv("", item.name),
+            textDiv("hint", item.saved_to)
+          );
+          div.append(body, makeCopyButton("copy_path", item.saved_to));
         } else {
           const subject = document.createElement("b");
           subject.textContent = item.subject;
           const subjectDiv = textDiv("", "");
           subjectDiv.appendChild(subject);
-          body.append(textDiv("k", "mensaje"), subjectDiv, textDiv("", item.text));
-          div.append(body, makeCopyButton("Copiar texto", item.text));
+          body.append(textDiv("k", t().kind_message), subjectDiv, textDiv("", item.text));
+          div.append(body, makeCopyButton("copy_text", item.text));
         }
         extractResultEl.appendChild(div);
       });
     } catch (err) {
-      showResult(extractResultEl, `Error: ${err}`, false);
+      showResult(extractResultEl, t().err_prefix(err), false);
     }
   });
 });
@@ -437,24 +457,69 @@ if (window.__TAURI__?.webview?.getCurrentWebview) {
   });
 }
 
+// ---------- Selector de idioma (i18n ES / EN) ----------
+function applyLanguage(lang) {
+  currentLang = lang;
+  const s = t();
+  document.documentElement.lang = lang;
+  document.title = s.page_title;
+  langSwitchBtn.textContent = lang === "es" ? "EN" : "ES";
+  langSwitchBtn.setAttribute("aria-label", s.lang_switch_title);
+
+  document.querySelectorAll("[data-i18n]").forEach((el) => {
+    const key = el.dataset.i18n;
+    if (typeof s[key] === "string") {
+      el.textContent = s[key];
+    }
+  });
+  document.querySelectorAll("[data-i18n-placeholder]").forEach((el) => {
+    const key = el.dataset.i18nPlaceholder;
+    if (typeof s[key] === "string") el.placeholder = s[key];
+  });
+  document.querySelectorAll("[data-i18n-aria]").forEach((el) => {
+    const key = el.dataset.i18nAria;
+    if (typeof s[key] === "string") el.setAttribute("aria-label", s[key]);
+  });
+  document.querySelectorAll("[data-i18n-title]").forEach((el) => {
+    const key = el.dataset.i18nTitle;
+    if (typeof s[key] === "string") el.title = s[key];
+  });
+
+  if (stegoPath) {
+    stegoNameEl.textContent = basename(stegoPath);
+  }
+  if (carrierPath) {
+    carrierNameEl.textContent = basename(carrierPath);
+  }
+  renderCarrierInfo();
+  renderItems();
+  updatePasswordMatch();
+}
+
+langSwitchBtn.addEventListener("click", () => {
+  const next = currentLang === "es" ? "en" : "es";
+  saveLang(next);
+  applyLanguage(next);
+});
+
 // ---------- Utilidades ----------
 
-function makeCopyButton(label, value) {
+function makeCopyButton(labelKey, value) {
   const btn = document.createElement("button");
   btn.type = "button";
   btn.className = "btn-copy";
-  btn.textContent = label;
+  btn.textContent = t()[labelKey];
   btn.addEventListener("click", async () => {
     try {
       await navigator.clipboard.writeText(value);
-      btn.textContent = "¡Copiado!";
+      btn.textContent = t().copied;
       setTimeout(() => {
-        btn.textContent = label;
+        btn.textContent = t()[labelKey];
       }, 1500);
     } catch {
-      btn.textContent = "No disponible";
+      btn.textContent = t().copy_unavailable;
       setTimeout(() => {
-        btn.textContent = label;
+        btn.textContent = t()[labelKey];
       }, 1500);
     }
   });
@@ -463,7 +528,7 @@ function makeCopyButton(label, value) {
 
 function extBadge(name) {
   const dot = name.lastIndexOf(".");
-  if (dot <= 0 || dot === name.length - 1) return "ARCH";
+  if (dot <= 0 || dot === name.length - 1) return t().thumb_default;
   return name.slice(dot + 1, dot + 5).toUpperCase();
 }
 
@@ -471,7 +536,9 @@ function extBadge(name) {
 // (guardando su estado previo para no reactivar p. ej. LSB si no era imagen)
 // y mostramos aviso para que nadie lance una segunda operación ni edite la lista.
 async function whileBusy(btn, resultEl, work) {
-  const controls = document.querySelectorAll(".tabs button, main button, main input, main textarea");
+  const controls = document.querySelectorAll(
+    ".tabs button, #lang-switch, main button, main input, main textarea"
+  );
   const prevDisabled = new Map();
   controls.forEach((el) => {
     prevDisabled.set(el, el.disabled);
@@ -479,7 +546,7 @@ async function whileBusy(btn, resultEl, work) {
   });
   btn.disabled = true;
   resultEl.className = "result";
-  resultEl.textContent = "Trabajando… (derivar la clave de la contraseña tarda unos segundos)";
+  resultEl.textContent = t().busy_msg;
   try {
     await work();
   } finally {
@@ -497,8 +564,8 @@ function textDiv(className, text) {
 }
 
 function formatBytes(n) {
-  const fmt = (x) => x.toLocaleString("es", { maximumFractionDigits: 1 });
-  if (n < 1024) return `${n} bytes`;
+  const fmt = (x) => x.toLocaleString(t().locale, { maximumFractionDigits: 1 });
+  if (n < 1024) return `${n} B`;
   if (n < 1024 * 1024) return `${fmt(n / 1024)} KB`;
   return `${fmt(n / (1024 * 1024))} MB`;
 }
@@ -512,7 +579,7 @@ function suggestOutputName(carrier, mode) {
   const dot = name.lastIndexOf(".");
   const base = dot > 0 ? name.slice(0, dot) : name;
   const ext = mode === "lsb" ? "png" : dot > 0 ? name.slice(dot + 1) : "bin";
-  return `${base}_secreto.${ext}`;
+  return `${base}${t().default_out_suffix}.${ext}`;
 }
 
 function showResult(el, message, ok) {
@@ -520,5 +587,4 @@ function showResult(el, message, ok) {
   el.textContent = message;
 }
 
-renderItems();
-updateSummary();
+applyLanguage(currentLang);

@@ -44,6 +44,31 @@ body {
   color: var(--accent);
 }
 
+.topbar-right {
+  display: flex;
+  align-items: stretch;
+  gap: 1.25rem;
+  align-self: stretch;
+}
+
+.lang-switch {
+  align-self: center;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-dim);
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  padding: 0.3rem 0.55rem;
+  cursor: pointer;
+}
+
+.lang-switch:hover {
+  color: var(--text);
+  border-color: var(--accent);
+}
+
 .tabs {
   display: flex;
   gap: 1.25rem;

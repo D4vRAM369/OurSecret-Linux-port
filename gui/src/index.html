@@ -9,10 +9,13 @@
   <body>
     <header class="topbar">
       <h1>OurSecret <span class="accent">Linux</span></h1>
-      <nav class="tabs" role="tablist">
-        <button class="tab-btn active" data-tab="hide" role="tab" aria-selected="true" aria-controls="tab-hide">Esconder</button>
-        <button class="tab-btn" data-tab="extract" role="tab" aria-selected="false" aria-controls="tab-extract">Extraer</button>
-      </nav>
+      <div class="topbar-right">
+        <nav class="tabs" role="tablist">
+          <button class="tab-btn active" data-tab="hide" data-i18n="tab_hide" role="tab" aria-selected="true" aria-controls="tab-hide">Esconder</button>
+          <button class="tab-btn" data-tab="extract" data-i18n="tab_extract" role="tab" aria-selected="false" aria-controls="tab-extract">Extraer</button>
+        </nav>
+        <button id="lang-switch" type="button" class="lang-switch" data-i18n-title="lang_switch_title" aria-label="Switch language">EN</button>
+      </div>
     </header>
 
     <main>
@@ -22,46 +25,46 @@
           <!-- Columna izquierda: Portador, Modo, Contraseña -->
           <div class="col">
             <section class="step">
-              <h2>1. Archivo portador</h2>
+              <h2 data-i18n="step_carrier">1. Archivo portador</h2>
               <div id="carrier-dropzone" class="dropzone">
                 <div id="carrier-thumb" class="thumb">ARCH</div>
                 <div class="dz-meta">
-                  <div id="carrier-name" class="dz-title">Ninguno seleccionado</div>
-                  <div id="carrier-info" class="info" aria-live="polite">Cualquier archivo sirve (PNG/BMP permite además modo LSB). Arrastra aquí o elige uno.</div>
+                  <div id="carrier-name" class="dz-title" data-i18n="carrier_none">Ninguno seleccionado</div>
+                  <div id="carrier-info" class="info" aria-live="polite" data-i18n="carrier_hint_default">Cualquier archivo sirve (PNG/BMP permite además modo LSB). Arrastra aquí o elige uno.</div>
                 </div>
-                <button id="pick-carrier" class="btn">Elegir…</button>
+                <button id="pick-carrier" class="btn" data-i18n="btn_pick">Elegir…</button>
               </div>
             </section>
 
             <section class="step">
-              <h2>2. Modo de ocultación</h2>
+              <h2 data-i18n="step_mode">2. Modo de ocultación</h2>
               <fieldset class="modes modes-stack">
-                <legend class="sr-only">Modo de ocultación</legend>
+                <legend class="sr-only" data-i18n="step_mode">Modo de ocultación</legend>
                 <label class="mode-card">
                   <input type="radio" name="mode" value="append" checked />
-                  <span class="mode-title">Crece <code>append</code></span>
-                  <span class="mode-desc">Cualquier archivo. Los datos van al final y el archivo pesa más.</span>
-                  <span class="mode-warn">En PNG, JPEG, PDF o ZIP se nota que sobran datos.</span>
+                  <span class="mode-title"><span data-i18n="mode_append_title">Crece</span> <code>append</code></span>
+                  <span class="mode-desc" data-i18n="mode_append_desc">Cualquier archivo. Los datos van al final y el archivo pesa más.</span>
+                  <span class="mode-warn" data-i18n="mode_append_warn">En PNG, JPEG, PDF o ZIP se nota que sobran datos.</span>
                 </label>
                 <label class="mode-card">
                   <input type="radio" name="mode" value="lsb" />
-                  <span class="mode-title">Mismas dimensiones <code>LSB</code></span>
-                  <span class="mode-desc">Solo PNG/BMP. Repartido por toda la imagen: más discreto.</span>
-                  <span class="mode-warn">Cabe poco, y la salida siempre es PNG.</span>
+                  <span class="mode-title"><span data-i18n="mode_lsb_title">Mismas dimensiones</span> <code>LSB</code></span>
+                  <span class="mode-desc" data-i18n="mode_lsb_desc">Solo PNG/BMP. Repartido por toda la imagen: más discreto.</span>
+                  <span class="mode-warn" data-i18n="mode_lsb_warn">Cabe poco, y la salida siempre es PNG.</span>
                 </label>
               </fieldset>
             </section>
 
             <section class="step">
-              <h2>3. Contraseña</h2>
+              <h2 data-i18n="step_password">3. Contraseña</h2>
               <div class="pw-stack">
                 <div class="pw-wrap">
-                  <input id="password" type="password" placeholder="Contraseña" aria-label="Contraseña" autocomplete="new-password" />
-                  <button type="button" class="pw-eye" data-eye="password" aria-label="Mostrar u ocultar contraseña" title="Mostrar/ocultar">👁</button>
+                  <input id="password" type="password" placeholder="Contraseña" data-i18n-placeholder="pw_placeholder" data-i18n-aria="pw_placeholder" aria-label="Contraseña" autocomplete="new-password" />
+                  <button type="button" class="pw-eye" data-eye="password" data-i18n-aria="pw_show_hide" data-i18n-title="pw_toggle_title" aria-label="Mostrar u ocultar contraseña" title="Mostrar/ocultar">👁</button>
                 </div>
                 <div class="pw-wrap">
-                  <input id="password2" type="password" placeholder="Repite la contraseña" aria-label="Repite la contraseña" autocomplete="new-password" />
-                  <button type="button" class="pw-eye" data-eye="password2" aria-label="Mostrar u ocultar confirmación" title="Mostrar/ocultar">👁</button>
+                  <input id="password2" type="password" placeholder="Repite la contraseña" data-i18n-placeholder="pw2_placeholder" data-i18n-aria="pw2_placeholder" aria-label="Repite la contraseña" autocomplete="new-password" />
+                  <button type="button" class="pw-eye" data-eye="password2" data-i18n-aria="pw2_show_hide" data-i18n-title="pw_toggle_title" aria-label="Mostrar u ocultar confirmación" title="Mostrar/ocultar">👁</button>
                 </div>
               </div>
               <div id="pw-match" class="pw-match" aria-live="polite"></div>
@@ -71,10 +74,10 @@
           <!-- Columna derecha: Contenido + Capacidad + Acción -->
           <div class="col">
             <section class="step">
-              <h2>Qué quieres esconder</h2>
+              <h2 data-i18n="step_items">Qué quieres esconder</h2>
               <div id="items-dropzone" class="dropzone dropzone-compact">
-                <span class="dz-sub">Arrastra archivos aquí o añádelos:</span>
-                <button id="add-file" class="btn btn-secondary">+ Añadir archivo</button>
+                <span class="dz-sub" data-i18n="items_drop_hint">Arrastra archivos aquí o añádelos:</span>
+                <button id="add-file" class="btn btn-secondary" data-i18n="btn_add_file">+ Añadir archivo</button>
               </div>
               <ul id="item-list" class="item-list"></ul>
               <div id="usage" class="usage" hidden>
@@ -83,16 +86,16 @@
               </div>
 
               <details class="message-box">
-                <summary>Añadir un mensaje de texto</summary>
-                <input id="msg-subject" type="text" placeholder="Asunto" aria-label="Asunto del mensaje" />
-                <textarea id="msg-text" rows="4" placeholder="Escribe el mensaje…" aria-label="Texto del mensaje"></textarea>
-                <button id="add-message" class="btn btn-secondary">Añadir mensaje a la lista</button>
+                <summary data-i18n="msg_details_summary">Añadir un mensaje de texto</summary>
+                <input id="msg-subject" type="text" placeholder="Asunto" data-i18n-placeholder="msg_subject_ph" data-i18n-aria="msg_subject_ph" aria-label="Asunto del mensaje" />
+                <textarea id="msg-text" rows="4" placeholder="Escribe el mensaje…" data-i18n-placeholder="msg_text_ph" data-i18n-aria="msg_text_ph" aria-label="Texto del mensaje"></textarea>
+                <button id="add-message" class="btn btn-secondary" data-i18n="btn_add_msg">Añadir mensaje a la lista</button>
               </details>
             </section>
 
             <div class="action-card">
-              <div id="hide-summary" class="summary-pill">Elige un portador y añade al menos un archivo o mensaje.</div>
-              <button id="do-hide" class="btn btn-primary">Esconder y guardar como…</button>
+              <div id="hide-summary" class="summary-pill" data-i18n="summary_empty">Elige un portador y añade al menos un archivo o mensaje.</div>
+              <button id="do-hide" class="btn btn-primary" data-i18n="btn_do_hide">Esconder y guardar como…</button>
             </div>
             <div id="hide-result" class="result" aria-live="polite"></div>
           </div>
@@ -103,25 +106,25 @@
       <section id="tab-extract" class="tab-panel" role="tabpanel">
         <div class="extract-stack">
           <section class="step">
-            <h2>1. Archivo con datos ocultos</h2>
+            <h2 data-i18n="extract_step_file">1. Archivo con datos ocultos</h2>
             <div id="stego-dropzone" class="dropzone">
               <div class="thumb">?</div>
               <div class="dz-meta">
-                <div id="stego-name" class="dz-title">Ninguno seleccionado</div>
-                <div class="info">Arrastra aquí el archivo o pulsa Elegir…</div>
+                <div id="stego-name" class="dz-title" data-i18n="carrier_none">Ninguno seleccionado</div>
+                <div class="info" data-i18n="extract_drop_hint">Arrastra aquí el archivo o pulsa Elegir…</div>
               </div>
-              <button id="pick-stego" class="btn">Elegir…</button>
+              <button id="pick-stego" class="btn" data-i18n="btn_pick">Elegir…</button>
             </div>
           </section>
 
           <section class="step">
-            <h2>2. Contraseña</h2>
+            <h2 data-i18n="extract_step_pw">2. Contraseña</h2>
             <div class="row">
               <div class="pw-wrap pw-grow">
-                <input id="extract-password" type="password" placeholder="Contraseña" aria-label="Contraseña del archivo" autocomplete="off" />
-                <button type="button" class="pw-eye" data-eye="extract-password" aria-label="Mostrar u ocultar contraseña" title="Mostrar/ocultar">👁</button>
+                <input id="extract-password" type="password" placeholder="Contraseña" data-i18n-placeholder="pw_placeholder" data-i18n-aria="pw_placeholder" aria-label="Contraseña del archivo" autocomplete="off" />
+                <button type="button" class="pw-eye" data-eye="extract-password" data-i18n-aria="pw_show_hide" data-i18n-title="pw_toggle_title" aria-label="Mostrar u ocultar contraseña" title="Mostrar/ocultar">👁</button>
               </div>
-              <button id="do-extract" class="btn btn-primary">Extraer en carpeta…</button>
+              <button id="do-extract" class="btn btn-primary" data-i18n="btn_do_extract">Extraer en carpeta…</button>
             </div>
           </section>
         </div>
@@ -129,7 +132,7 @@
       </section>
     </main>
 
-    <footer class="footer">
+    <footer class="footer" data-i18n="footer_text">
       Reimplementación clean-room, sin código del OurSecret original. Formato propio: AES-256-GCM + Argon2id.
     </footer>
 
