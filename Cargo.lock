@@ -2361,6 +2361,7 @@ dependencies = [
  "clap",
  "oursecret-core",
  "rpassword",
+ "zeroize",
 ]
 
 [[package]]
@@ -2387,6 +2388,7 @@ dependencies = [
  "tauri",
  "tauri-build",
  "tauri-plugin-dialog",
+ "zeroize",
 ]
 
 [[package]]
