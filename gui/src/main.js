@@ -82,12 +82,26 @@ async function selectCarrier(picked) {
 }
 
 async function addFiles(paths) {
+  const skipped = [];
   for (const p of paths) {
+    const label = basename(p);
+    const dup = items.some((it) => it.kind === "file" && it.label === label);
+    if (dup) {
+      skipped.push(label);
+      continue;
+    }
     // Sin tamaño (null) el archivo se esconde igual; solo falta en la barra.
     const size = await invoke("file_size", { path: p }).catch(() => null);
-    items.push({ kind: "file", path: p, label: basename(p), size });
+    items.push({ kind: "file", path: p, label, size });
   }
   renderItems();
+  if (skipped.length > 0) {
+    showResult(
+      hideResultEl,
+      `Ya había archivo(s) con el mismo nombre (${skipped.join(", ")}); renómbralo antes de añadirlo.`,
+      false
+    );
+  }
 }
 
 document.getElementById("pick-carrier").addEventListener("click", async () => {
@@ -417,6 +431,9 @@ function makeCopyButton(label, value) {
       }, 1500);
     } catch {
       btn.textContent = "No disponible";
+      setTimeout(() => {
+        btn.textContent = label;
+      }, 1500);
     }
   });
   return btn;

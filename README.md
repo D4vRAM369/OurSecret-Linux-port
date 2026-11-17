@@ -1,83 +1,143 @@
+<div align="center">
+
+![OurSecret Linux Banner](assets/banner.png)
+
 # OurSecret Linux
 
-Esconde archivos y mensajes cifrados dentro de otros archivos (fotos, canciones, documentos). Para Linux y Windows, con CLI y GUI.
+**Esteganografía + cifrado autenticado para ocultar archivos y mensajes dentro de otros archivos.**
 
-Es una reimplementación *clean-room* de OurSecret (SecureKit.net, solo Windows): reproduce lo que hace el original a partir de observar su comportamiento, sin copiar su código. **No es compatible** con los archivos del OurSecret original.
+[![Licencia: MIT](https://img.shields.io/badge/licencia-MIT-blue.svg)](LICENSE)
+[![Rust](https://img.shields.io/badge/Rust-stable-orange.svg)](https://www.rust-lang.org/)
+[![GUI: Tauri 2](https://img.shields.io/badge/GUI-Tauri%202-24C8DB.svg)](https://v2.tauri.app/)
+[![Plataformas](https://img.shields.io/badge/plataformas-Linux%20%7C%20Windows-lightgrey.svg)](#compilar-y-empaquetar)
 
-> ⚠️ **Estado: experimental.** No ha pasado una auditoría externa y el formato todavía puede cambiar sin compatibilidad hacia atrás (no lleva número de versión, a propósito). No lo uses para algo de lo que dependa tu seguridad.
+*Reimplementación **clean-room** de OurSecret (SecureKit.net, Windows) para Linux y Windows, con CLI y aplicación de escritorio.*
 
-## Cómo funciona
+</div>
 
-1. Los archivos y mensajes se empaquetan en un ZIP en memoria.
-2. Se cifran con **AES-256-GCM**. La clave se deriva de tu contraseña con **Argon2id** (64 MiB, t=3, p=4).
-3. El resultado se esconde en el archivo portador con uno de dos modos:
+---
 
-| Modo | Portador | Qué pasa con el archivo | ¿Se nota? |
-|---|---|---|---|
-| `append` (crece) | cualquiera | crece; los datos van al final | En PNG, JPEG, PDF y ZIP se ve que sobran bytes tras el final. En audio y vídeo, menos. |
-| `lsb` (mismas dimensiones) | PNG o BMP | misma imagen; la salida es siempre PNG | Datos repartidos por toda la imagen según la clave, con ±1 matching. No lo detectan los análisis clásicos (chi², RS); el estegoanálisis moderno sí puede con cargas altas. |
+> ⚠️ **Estado experimental (`v0.1.0`)**: este proyecto no ha pasado una auditoría criptográfica externa y el formato del contenedor podría evolucionar sin compatibilidad hacia atrás (no incluye cabecera de versión de forma intencionada). No lo uses para proteger información crítica de la que dependa tu seguridad personal o legal.
 
-Sin la contraseña, nada en el archivo indica que sea de este programa: no hay firma, cabecera ni longitud en claro.
+> ℹ️ **Compatibilidad**: reproduce el *comportamiento observable* del OurSecret original a partir de análisis externo, sin copiar ni descompilar su código. **No es compatible** con los archivos generados por el OurSecret original de Windows.
 
-## Uso
+---
 
-### CLI
+## ¿Qué hace?
+
+1. **Empaqueta** uno o varios archivos y/o mensajes de texto (`asunto` + `cuerpo`) en un contenedor ZIP en memoria.
+2. **Deriva una clave** de 256 bits a partir de tu contraseña con **Argon2id** (`m = 64 MiB`, `t = 3`, `p = 4`, sal aleatoria de 16 bytes) y cifra el bloque con **AES-256-GCM** (nonce aleatorio de 12 bytes, tag de autenticación de 16 bytes).
+3. **Oculta** el contenedor cifrado dentro de un archivo portador (*carrier*) mediante una de dos estrategias:
+
+| Modo | Portadores admitidos | ¿Cambia el tamaño? | Cómo oculta los datos | Nivel de discreción |
+|---|---|---|---|---|
+| `append` | Cualquier archivo (MP3, MP4, MKV, PDF, BIN…) | Sí, crece | Añade `[nonce \| ciphertext \| salt \| len XOR máscara]` al final del portador | En PNG, JPEG, PDF y ZIP se detectan bytes sobrantes tras el marcador de fin. En audio/vídeo pasa más desapercibido. |
+| `lsb` | Imágenes **PNG** o **BMP** (salida siempre **PNG RGB**) | Mismas dimensiones | Sal en `0..128`, longitud enmascarada en `128..160` y payload disperso por permutación derivada de la clave con **±1 matching** | No lo detectan los tests clásicos (chi² por prefijos, análisis RS). El estegoanálisis moderno puede notarlo con cargas altas. |
+
+Sin la contraseña correcta, **no existe ninguna firma mágica, cabecera ni longitud en claro** que identifique el archivo como creado por este programa.
+
+---
+
+## Uso rápido
+
+### Interfaz de escritorio (GUI)
+
+Aplicación nativa construida con **Tauri 2**:
+
+- **Pestaña Esconder (2 columnas)**: selecciona o arrastra el archivo portador, elige el modo (`append` o `lsb` con barra de capacidad estimada en tiempo real), añade archivos o mensajes y define la contraseña (con indicador de coincidencia). Nunca sobrescribe el portador original sin confirmación explícita mediante diálogo *Guardar como…*.
+- **Pestaña Extraer**: arrastra o selecciona el archivo contenedor, introduce la contraseña y elige la carpeta de destino. Muestra los mensajes extraídos de forma segura y permite copiar texto o rutas al portapapeles.
+
+<!-- Añade aquí una captura de la GUI tras compilarla: ![Captura de OurSecret Linux](assets/gui-preview.png) -->
+
+### Línea de comandos (`oursecret`)
 
 ```bash
-# Esconder un archivo y un mensaje en una foto (la contraseña se pide si no se pasa con -p)
-oursecret hide -c foto.png -o foto_secreta.png -f nota.txt -m "asunto:texto" --mode lsb
+# Esconder un archivo y un mensaje dentro de una imagen (modo LSB)
+oursecret hide -c foto.png -o foto_secreta.png -f nota.txt -m "Aviso:leer hoy" --mode lsb
 
-# Extraer (nunca sobrescribe: si nota.txt ya existe, guarda "nota (1).txt")
-oursecret extract -i foto_secreta.png -o ./extraido
+# Esconder dentro de cualquier archivo (modo append, por defecto)
+oursecret hide -c cancion.mp3 -o cancion_secreta.mp3 -f documento.pdf
 
-# ¿Cuánto cabe en esta imagen en modo lsb?
+# Calcular cuántos bytes de usuario caben en una imagen en modo LSB
 oursecret capacity -c foto.png
+
+# Extraer contenido oculto (si no pasas -p, pide la contraseña sin eco en pantalla)
+oursecret extract -i foto_secreta.png -o ./extraido
 ```
 
-### GUI
+> 💡 **Consejo**: omite `--password` / `-p` para introducir la contraseña de forma interactiva y evitar que quede guardada en el historial de tu terminal.
 
-Aplicación de escritorio Tauri: elige portador, añade archivos o mensajes, contraseña y modo.
-
-## Compilar
-
-Requisitos: Rust estable. Para la GUI en Linux, además, las librerías de WebKitGTK:
-
-```bash
-sudo apt-get install libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev
-```
-
-```bash
-cargo build --release -p oursecret-cli      # → target/release/oursecret
-cargo test -p oursecret-core                # tests del núcleo
-
-cd gui && npm install && npx tauri build    # → .deb y AppImage en target/release/bundle/
-```
-
-Windows: la CI (`.github/workflows/ci.yml`) compila `oursecret.exe` y `oursecret-gui.exe` en cada push y los deja como artefacto. La GUI requiere WebView2 (incluido por defecto en Windows 10/11).
-
-## Estructura
-
-```
-core/          oursecret-core: toda la lógica (cifrado, empaquetado, modos de ocultación)
-cli/           oursecret: línea de comandos (hide / extract / capacity)
-gui/           GUI Tauri: frontend HTML/JS en gui/src, backend Rust en gui/src-tauri
-```
-
-La CLI y la GUI son capas finas sobre `oursecret-core`.
+---
 
 ## Seguridad: qué protege y qué no
 
-- ✅ **Contenido:** sin la contraseña no se puede leer (AES-GCM también detecta manipulaciones).
-- ✅ **Autoría:** nada en el archivo indica qué programa lo creó.
-- ⚠️ **Existencia:** en modo `append` con PNG/JPEG/PDF/ZIP se nota que *hay algo*. En modo `lsb`, con cargas altas, el estegoanálisis moderno puede notarlo.
-- ✅ **Archivos de terceros:** quien te manda un archivo conoce la contraseña y elige su contenido. Al extraer, la app no sobrescribe archivos existentes, no deja salir de la carpeta elegida (zip-slip), no interpreta los textos como HTML y limita el tamaño descomprimido (zip bombs).
-- ⚠️ **Contraseña:** Argon2id frena la fuerza bruta, pero una contraseña corta o común se puede adivinar igual.
+- ✅ **Confidencialidad e integridad**: sin la contraseña no es posible leer ni alterar el contenido sin que **AES-256-GCM** lo detecte.
+- ✅ **Sin huella de formato**: no hay bytes mágicos (`OSLX`, etc.), versión ni longitud en claro.
+- ✅ **Defensa frente a contenedores maliciosos** (quien conoce la contraseña elige nombres y contenido):
+  - **Sin sobrescritura**: `save_extracted_file` usa `create_new` atómico y renombra colisiones a `nombre (1).ext` en lugar de pisar archivos existentes.
+  - **Anti zip-slip**: al extraer solo se usa el nombre base del archivo.
+  - **Anti zip-bomb**: el descompresor limita el total extraído a `max(256 MiB, 20 × tamaño_blob)` leyendo por flujo (`Read::take`).
+  - **Anti XSS y terminal injection**: la GUI renderiza siempre con `textContent` bajo una CSP estricta (`script-src 'self'`), y la CLI neutraliza secuencias de escape ANSI y marcas bidireccionales Unicode (`U+202E`).
+  - **Limpieza de claves en RAM**: las claves derivadas y semillas temporales se limpian con `zeroize` al salir de ámbito.
+- ⚠️ **Indetectabilidad**: en modo `append`, herramientas que inspeccionan bytes tras el EOF en PNG/JPEG/PDF/ZIP detectan datos añadidos. En modo `lsb`, el ±1 matching evita análisis clásicos como RS, pero cargas altas pueden ser detectadas por estegoanálisis estadístico moderno.
+- ⚠️ **Contraseñas débiles**: Argon2id encarece los ataques por fuerza bruta, pero no sustituye a una contraseña larga y única.
 
-## Contribuir y seguridad
+Consulta [`SECURITY.md`](SECURITY.md) para el modelo de amenazas completo y cómo reportar vulnerabilidades.
 
-- Guía para colaborar (y regla *clean-room*): [`CONTRIBUTING.md`](CONTRIBUTING.md).
-- Modelo de amenazas y reporte de vulnerabilidades: [`SECURITY.md`](SECURITY.md).
+---
 
-## Licencia
+## Compilar y empaquetar
 
-MIT — ver [`LICENSE`](LICENSE).
+### Requisitos
+
+- **Rust** estable (`cargo`, `rustc`)
+- **Node.js / npm** (solo para empaquetar el bundle Tauri con `npx tauri build`)
+- En **Linux**, dependencias de sistema de WebKitGTK para compilar la GUI:
+
+```bash
+sudo apt-get update
+sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev
+```
+
+### Comandos de compilación y verificación
+
+```bash
+# Compilar solo la CLI en modo release → target/release/oursecret
+cargo build --release -p oursecret-cli
+
+# Ejecutar todos los tests del workspace y comprobaciones de CI
+cargo fmt --all --check
+cargo clippy --workspace --all-targets -- -D warnings
+cargo test --workspace
+node --check gui/src/main.js
+
+# Empaquetar la GUI en Linux (.deb y .AppImage en target/release/bundle/)
+cd gui && npm install && npx tauri build
+```
+
+### Windows
+
+El workflow de GitHub Actions (`.github/workflows/ci.yml`) ejecuta los tests del núcleo y compila `oursecret.exe` y `oursecret-gui.exe` (MSVC, sin necesitar `WebView2Loader.dll` externa). Los tags `v*` activan `.github/workflows/release.yml` para publicar binarios Linux/Windows y `SHA256SUMS.txt`.
+
+---
+
+## Arquitectura del workspace
+
+```text
+OurSecret-Linux-port/
+├── core/                  # oursecret-core: criptografía, ZIP en memoria, modos append y lsb
+├── cli/                   # oursecret: interfaz de línea de comandos (clap + rpassword)
+├── gui/
+│   ├── src/               # Frontend vanilla HTML/CSS/JS con CSP estricta
+│   └── src-tauri/         # Backend Tauri 2 (capa fina sobre oursecret-core)
+└── .github/workflows/     # CI (Linux + Windows) y Release por tags v*
+```
+
+`oursecret-core` es la única fuente de verdad: tanto la CLI como el backend Tauri delegan en `oursecret_core::{hide, read, probe_lsb_capacity, save_extracted_file}`.
+
+---
+
+## Contribuir y licencia
+
+- Lee [`CONTRIBUTING.md`](CONTRIBUTING.md) antes de abrir un *Pull Request* (incluye la **regla clean-room** obligatoria y las comprobaciones locales).
+- Distribuido bajo licencia **MIT** — ver [`LICENSE`](LICENSE).

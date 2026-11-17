@@ -50,6 +50,11 @@ pub fn hide(
             "la contraseña no puede estar vacía",
         ));
     }
+    if items.is_empty() {
+        return Err(OurSecretError::InvalidInput(
+            "no hay nada que esconder: añade al menos un archivo o mensaje",
+        ));
+    }
     let plain_blob = bundle::pack(items)?;
 
     match mode {
@@ -308,6 +313,17 @@ mod tests {
         std::fs::write(&stego, b"cualquier cosa").unwrap();
         let err = read(&stego, "").unwrap_err();
         assert!(matches!(err, OurSecretError::InvalidInput(_)));
+    }
+
+    #[test]
+    fn hide_rejects_empty_items() {
+        let dir = tempfile::tempdir().unwrap();
+        let carrier = dir.path().join("c.bin");
+        let out = dir.path().join("o.bin");
+        std::fs::write(&carrier, b"portador").unwrap();
+        let err = hide(&carrier, &[], "pw", EmbedMode::Append, &out).unwrap_err();
+        assert!(matches!(err, OurSecretError::InvalidInput(_)));
+        assert!(!out.exists(), "no debe escribir nada");
     }
 
     #[test]

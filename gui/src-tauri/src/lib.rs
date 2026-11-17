@@ -130,20 +130,6 @@ fn probe_lsb_carrier(carrier_path: String) -> Result<Option<usize>, String> {
     oursecret_core::probe_lsb_capacity(&PathBuf::from(carrier_path)).map_err(|e| e.to_string())
 }
 
-/// Para el modo LSB: cuántos bytes caben en esta imagen, para avisar al
-/// usuario antes de que intente esconder algo demasiado grande.
-#[tauri::command(async)]
-fn lsb_capacity(carrier_path: String) -> Result<usize, String> {
-    oursecret_core::lsb_capacity(&PathBuf::from(carrier_path)).map_err(|e| e.to_string())
-}
-
-/// Si `carrier_path` es una imagen PNG/BMP válida — decide si ofrecer el
-/// modo LSB en la interfaz o dejar solo el modo `append`.
-#[tauri::command(async)]
-fn is_lsb_carrier(carrier_path: String) -> bool {
-    oursecret_core::is_lsb_carrier(&PathBuf::from(carrier_path))
-}
-
 /// Tamaño de un archivo a esconder, para la barra "usado / capacidad" de
 /// la GUI antes de intentar esconder (y fallar por falta de sitio).
 #[tauri::command(async)]
@@ -161,8 +147,6 @@ pub fn run() {
             hide_items,
             extract_items,
             probe_lsb_carrier,
-            lsb_capacity,
-            is_lsb_carrier,
             file_size
         ])
         .run(tauri::generate_context!())
